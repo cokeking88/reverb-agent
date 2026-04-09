@@ -34,6 +34,11 @@ class Observer(ABC):
         """Register a callback for events."""
         self._callbacks.append(callback)
     
+    def remove_callback(self, callback: Callable[[ObserverEvent], None]) -> None:
+        """Remove a registered callback."""
+        if callback in self._callbacks:
+            self._callbacks.remove(callback)
+    
     def _emit(self, event: ObserverEvent) -> None:
         """Emit an event to all registered callbacks."""
         for callback in self._callbacks:

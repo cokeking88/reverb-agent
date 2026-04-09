@@ -89,7 +89,8 @@ def observe(interval):
     try:
         asyncio.run(registry.start_all())
     except KeyboardInterrupt:
-        console.print("\n[yellow]Stopping observation...[/yellow]")
+        pass
+    finally:
         asyncio.run(registry.stop_all())
 
 

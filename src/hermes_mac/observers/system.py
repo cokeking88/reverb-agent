@@ -1,7 +1,6 @@
 """System observer for macOS events."""
 
 import asyncio
-import subprocess
 from typing import List
 from hermes_mac.observers.base import Observer
 from hermes_mac.observers.events import ObserverEvent
@@ -61,14 +60,15 @@ class SystemObserver(Observer):
         end tell
         '''
         
-        result = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True,
-            text=True
+        result = await asyncio.create_subprocess_exec(
+            "osascript", "-e", script,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
         )
+        stdout, _ = await result.communicate()
         
         if result.returncode == 0:
-            output = result.stdout.strip()
+            output = stdout.decode().strip()
             if output:
                 parts = output.split("|||")
                 app_name = parts[0] if len(parts) > 0 else ""

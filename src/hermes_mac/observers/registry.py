@@ -6,7 +6,11 @@ from hermes_mac.observers.events import ObserverEvent
 
 
 class ObserverRegistry:
-    """Registry for managing all observers."""
+    """Registry for managing all observers.
+    
+    Note: This class is not thread-safe. All operations should be
+    performed from a single thread (typically the asyncio event loop).
+    """
     
     def __init__(self):
         self._observers: Dict[str, Observer] = {}
