@@ -12,7 +12,9 @@ src/hermes_mac.egg-info/requires.txt
 src/hermes_mac.egg-info/top_level.txt
 src/hermes_mac/observers/__init__.py
 src/hermes_mac/observers/base.py
+src/hermes_mac/observers/browser.py
 src/hermes_mac/observers/events.py
+src/hermes_mac/observers/ide_observer.py
 src/hermes_mac/observers/intellij.py
 src/hermes_mac/observers/registry.py
 src/hermes_mac/observers/system.py

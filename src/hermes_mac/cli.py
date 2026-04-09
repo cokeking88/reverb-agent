@@ -13,6 +13,8 @@ from hermes_mac.observers import ObserverRegistry
 from hermes_mac.observers.system import SystemObserver
 from hermes_mac.observers.vscode import VSCodeObserver
 from hermes_mac.observers.intellij import IntelliJObserver
+from hermes_mac.observers.browser import BrowserObserver
+from hermes_mac.observers.feishu import FeishuObserver
 from hermes_mac.observers.events import ObserverEvent
 
 console = Console()
@@ -73,8 +75,9 @@ def init():
 
 @main.command()
 @click.option("--interval", default=5, help="Polling interval in seconds")
-@click.option("--observers", default="system,vscode,intellij", help="Comma-separated list of observers to enable")
-def observe(interval, observers):
+@click.option("--observers", default="system,vscode,intellij,browser,feishu", help="Comma-separated list of observers to enable")
+@click.option("--browser", default="Google Chrome", help="Browser to monitor (Google Chrome, Safari, Microsoft Edge)")
+def observe(interval, observers, browser):
     """Start observation mode."""
     enabled = [o.strip() for o in observers.split(",")]
     console.print(f"[green]Starting observation (interval: {interval}s)...[/green]")
@@ -97,6 +100,18 @@ def observe(interval, observers):
             console.print("[green]IntelliJ observer enabled[/green]")
         except Exception as e:
             console.print(f"[yellow]Warning: Could not enable IntelliJ observer: {e}[/yellow]")
+    if "browser" in enabled:
+        try:
+            registry.register(BrowserObserver(browser=browser, interval=3))
+            console.print(f"[green]Browser observer enabled ({browser})[/green]")
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not enable Browser observer: {e}[/yellow]")
+    if "feishu" in enabled:
+        try:
+            registry.register(FeishuObserver(interval=3))
+            console.print("[green]Feishu observer enabled[/green]")
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not enable Feishu observer: {e}[/yellow]")
     
     # Register global event handler
     def on_event(event: ObserverEvent):
