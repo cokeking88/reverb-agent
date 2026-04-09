@@ -11,3 +11,4 @@ Requires-Dist: aiosqlite>=0.19.0
 Requires-Dist: pyyaml>=6.0.0
 Requires-Dist: pydantic>=2.0.0
 Requires-Dist: pytest>=7.0.0
+Requires-Dist: aiohttp>=3.9.0
