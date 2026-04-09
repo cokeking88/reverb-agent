@@ -2,9 +2,12 @@ pyproject.toml
 src/hermes_mac/__init__.py
 src/hermes_mac/__main__.py
 src/hermes_mac/cli.py
+src/hermes_mac/config.py
+src/hermes_mac/constants.py
 src/hermes_mac.egg-info/PKG-INFO
 src/hermes_mac.egg-info/SOURCES.txt
 src/hermes_mac.egg-info/dependency_links.txt
 src/hermes_mac.egg-info/entry_points.txt
 src/hermes_mac.egg-info/requires.txt
 src/hermes_mac.egg-info/top_level.txt
+tests/test_config.py

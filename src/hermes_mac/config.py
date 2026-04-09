@@ -48,9 +48,12 @@ def load_config() -> AppConfig:
     """Load configuration from file."""
     config_path = get_config_path()
     if config_path.exists():
-        with open(config_path) as f:
-            data = json.load(f)
-            return AppConfig(**data)
+        try:
+            with open(config_path) as f:
+                data = json.load(f)
+                return AppConfig(**data)
+        except (json.JSONDecodeError, IOError):
+            pass
     return AppConfig()
 
 
@@ -59,8 +62,11 @@ def save_config(config: AppConfig) -> None:
     config_dir = get_config_dir()
     config_dir.mkdir(parents=True, exist_ok=True)
     config_path = get_config_path()
-    with open(config_path, "w") as f:
-        json.dump(config.model_dump(), f, indent=2, default=str)
+    try:
+        with open(config_path, "w") as f:
+            json.dump(config.model_dump(), f, indent=2, default=str)
+    except IOError:
+        pass
 
 
 def ensure_data_dir(config: AppConfig) -> Path:

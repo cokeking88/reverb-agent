@@ -21,7 +21,11 @@ def main():
 @main.command()
 def status():
     """Show current status."""
-    config = load_config()
+    try:
+        config = load_config()
+    except Exception:
+        console.print("[red]Failed to load config[/red]")
+        return
     table = Table(title="Hermes-mac Status")
     table.add_column("Setting", style="cyan")
     table.add_column("Value", style="green")
@@ -29,7 +33,7 @@ def status():
     table.add_row("Data Directory", str(config.data_dir))
     table.add_row("LLM Provider", config.llm.provider)
     table.add_row("LLM Model", config.llm.model)
-    table.add_row("Observers Enabled", str(len([o for o in config.observers.observers if config.observers.enabled])))
+    table.add_row("Observers Enabled", str(config.observers.enabled))
     
     console.print(table)
 
