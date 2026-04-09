@@ -11,6 +11,8 @@ from hermes_mac.constants import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
 from hermes_mac import __version__
 from hermes_mac.observers import ObserverRegistry
 from hermes_mac.observers.system import SystemObserver
+from hermes_mac.observers.vscode import VSCodeObserver
+from hermes_mac.observers.intellij import IntelliJObserver
 from hermes_mac.observers.events import ObserverEvent
 
 console = Console()
@@ -71,25 +73,42 @@ def init():
 
 @main.command()
 @click.option("--interval", default=5, help="Polling interval in seconds")
-def observe(interval):
+@click.option("--observers", default="system,vscode,intellij", help="Comma-separated list of observers to enable")
+def observe(interval, observers):
     """Start observation mode."""
+    enabled = [o.strip() for o in observers.split(",")]
     console.print(f"[green]Starting observation (interval: {interval}s)...[/green]")
+    console.print(f"[green]Enabled observers: {', '.join(enabled)}[/green]")
     
     registry = ObserverRegistry()
-    system_observer = SystemObserver(interval=interval)
+    
+    # Register observers based on selection
+    if "system" in enabled:
+        registry.register(SystemObserver(interval=interval))
+    if "vscode" in enabled:
+        try:
+            registry.register(VSCodeObserver(interval=2))  # IDEs use shorter interval
+            console.print("[green]VSCode observer enabled[/green]")
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not enable VSCode observer: {e}[/yellow]")
+    if "intellij" in enabled:
+        try:
+            registry.register(IntelliJObserver(interval=2))
+            console.print("[green]IntelliJ observer enabled[/green]")
+        except Exception as e:
+            console.print(f"[yellow]Warning: Could not enable IntelliJ observer: {e}[/yellow]")
     
     # Register global event handler
     def on_event(event: ObserverEvent):
         console.print(f"[cyan]{event.observer}[/cyan]: {event.type} - {event.source.get('app', 'N/A')}")
     
     registry.on_event(on_event)
-    registry.register(system_observer)
     
     # Run until interrupted
     try:
         asyncio.run(registry.start_all())
     except KeyboardInterrupt:
-        pass
+        console.print("\n[yellow]Stopping observation...[/yellow]")
     finally:
         asyncio.run(registry.stop_all())
 
