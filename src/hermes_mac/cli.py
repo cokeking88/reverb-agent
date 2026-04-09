@@ -1,5 +1,7 @@
 """CLI entry point for hermes-mac."""
 
+import asyncio
+
 import click
 from rich.console import Console
 from rich.table import Table
@@ -7,6 +9,9 @@ from rich.table import Table
 from hermes_mac.config import load_config, save_config, AppConfig, ensure_data_dir
 from hermes_mac.constants import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
 from hermes_mac import __version__
+from hermes_mac.observers import ObserverRegistry
+from hermes_mac.observers.system import SystemObserver
+from hermes_mac.observers.events import ObserverEvent
 
 console = Console()
 
@@ -62,6 +67,30 @@ def init():
     config = load_config()
     data_dir = ensure_data_dir(config)
     console.print(f"[green]Initialized data directory: {data_dir}[/green]")
+
+
+@main.command()
+@click.option("--interval", default=5, help="Polling interval in seconds")
+def observe(interval):
+    """Start observation mode."""
+    console.print(f"[green]Starting observation (interval: {interval}s)...[/green]")
+    
+    registry = ObserverRegistry()
+    system_observer = SystemObserver(interval=interval)
+    
+    # Register global event handler
+    def on_event(event: ObserverEvent):
+        console.print(f"[cyan]{event.observer}[/cyan]: {event.type} - {event.source.get('app', 'N/A')}")
+    
+    registry.on_event(on_event)
+    registry.register(system_observer)
+    
+    # Run until interrupted
+    try:
+        asyncio.run(registry.start_all())
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopping observation...[/yellow]")
+        asyncio.run(registry.stop_all())
 
 
 if __name__ == "__main__":
