@@ -5,7 +5,7 @@ import tempfile
 import os
 from pathlib import Path
 
-from hermes_mac.config import AppConfig, load_config, save_config
+from reverb_agent.config import AppConfig, load_config, save_config
 
 
 def test_default_config():
@@ -19,7 +19,7 @@ def test_default_config():
 def test_save_and_load_config(tmp_path, monkeypatch):
     """Test saving and loading configuration."""
     test_config_path = tmp_path / "config.json"
-    monkeypatch.setattr("hermes_mac.config.get_config_path", lambda: test_config_path)
+    monkeypatch.setattr("reverb_agent.config.get_config_path", lambda: test_config_path)
     
     config = AppConfig()
     config.llm.provider = "openai"

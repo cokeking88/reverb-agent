@@ -1,7 +1,7 @@
 [project]
-name = "hermes-mac"
+name = "reverb-agent"
 version = "0.1.0"
-description = "PC Personal Assistant with autonomous observation"
+description = "Personal AI assistant that learns from your work patterns"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -16,7 +16,7 @@ dependencies = [
 ]
 
 [project.scripts]
-hermes-mac = "hermes_mac.cli:main"
+reverb = "reverb_agent.cli:main"
 
 [build-system]
 requires = ["setuptools>=61.0"]
