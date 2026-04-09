@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.table import Table
 
 from hermes_mac.config import load_config, save_config, AppConfig, ensure_data_dir
-from hermes_mac.constants import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL
+from hermes_mac.constants import DEFAULT_LLM_PROVIDER, DEFAULT_LLM_MODEL, IDE_OBSERVER_INTERVAL
 from hermes_mac import __version__
 from hermes_mac.observers import ObserverRegistry
 from hermes_mac.observers.system import SystemObserver
@@ -87,13 +87,13 @@ def observe(interval, observers):
         registry.register(SystemObserver(interval=interval))
     if "vscode" in enabled:
         try:
-            registry.register(VSCodeObserver(interval=2))  # IDEs use shorter interval
+            registry.register(VSCodeObserver(interval=IDE_OBSERVER_INTERVAL))  # IDEs use shorter interval
             console.print("[green]VSCode observer enabled[/green]")
         except Exception as e:
             console.print(f"[yellow]Warning: Could not enable VSCode observer: {e}[/yellow]")
     if "intellij" in enabled:
         try:
-            registry.register(IntelliJObserver(interval=2))
+            registry.register(IntelliJObserver(interval=IDE_OBSERVER_INTERVAL))
             console.print("[green]IntelliJ observer enabled[/green]")
         except Exception as e:
             console.print(f"[yellow]Warning: Could not enable IntelliJ observer: {e}[/yellow]")

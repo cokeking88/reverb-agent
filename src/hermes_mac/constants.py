@@ -13,6 +13,7 @@ DB_FILE_NAME = "hermes.db"
 
 # Observers configuration
 DEFAULT_OBSERVER_INTERVAL = 5  # seconds
+IDE_OBSERVER_INTERVAL = 2  # seconds - IDEs use shorter intervals for responsiveness
 
 # LLM defaults
 DEFAULT_LLM_PROVIDER = "ollama"
