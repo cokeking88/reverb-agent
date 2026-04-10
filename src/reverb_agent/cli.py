@@ -234,6 +234,13 @@ while True:
     agent_loop = None
     event_loop = asyncio.new_event_loop()
     asyncio.set_event_loop(event_loop)
+    
+    # Run event loop in background
+    def run_loop():
+        event_loop.run_forever()
+    
+    loop_thread = threading.Thread(target=run_loop, daemon=True)
+    loop_thread.start()
     try:
         config = load_config()
         db_path = config.data_dir / "reverb.db"
@@ -264,6 +271,7 @@ while True:
     
     # Start system observer tail after agent_loop is ready
     if "system" in enabled:
+        print(f"[CLI] Starting tail with agent_loop: {agent_loop}")
         tail_thread = threading.Thread(target=tail_func, daemon=True)
         tail_thread.start()
     

@@ -22,6 +22,7 @@ class AgentLoop:
     
     def on_event(self, event: ObserverEvent) -> None:
         """Receive events from observers."""
+        print(f"[DEBUG] on_event called for {event.type}")
         self._event_buffer.append(event)
         # 记录到数据库
         self.memory.add_event(
@@ -32,13 +33,18 @@ class AgentLoop:
             event.data
         )
         
-        # 重要事件立即处理
+        # 重要事件立即处理 - use existing event loop
         if event.type in ["file_focus", "page_focus", "window_focus"]:
-            self._loop.create_task(self._process_events())
+            if self._loop.is_running():
+                self._loop.create_task(self._process_events())
+            else:
+                # Loop not running - run directly
+                asyncio.run(self._process_events())
     
     async def _process_events(self) -> None:
         """Process buffered events."""
-        print(f"[DEBUG] _process_events called, buffer: {len(self._event_buffer)}")
+        print(f"[DEBUG] _process_events called with {len(self._event_buffer)} events")
+        print(f"[DEBUG] LLM client: {self.llm}")
         if not self._event_buffer:
             return
         
@@ -47,6 +53,7 @@ class AgentLoop:
         
         try:
             analysis = await self._analyze_events(events)
+            print(f"[DEBUG] Analysis result: {analysis}")
             
             if analysis.get("should_remember"):
                 self.memory.add_memory(
@@ -56,9 +63,11 @@ class AgentLoop:
                 )
             
             if analysis.get("should_ask_user") and self._callback:
-                self._callback(analysis.get("question", ""))
+                q = analysis.get("question", "")
+                print(f"[DEBUG] Calling callback with: {q}")
+                self._callback(q)
         except Exception as e:
-            print(f"Error processing events: {e}")
+            print(f"[DEBUG] Error processing events: {e}")
     
     async def _analyze_events(self, events: List[ObserverEvent]) -> dict:
         """Use LLM to analyze events."""
