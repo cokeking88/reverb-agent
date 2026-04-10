@@ -8,6 +8,7 @@ from typing import List, Optional, Callable
 from reverb_agent.observers.events import ObserverEvent
 from reverb_agent.agent.llm import LLMClient
 from reverb_agent.agent.memory import MemoryStore
+from reverb_agent.logging import logger
 
 
 class AgentLoop:
@@ -20,10 +21,13 @@ class AgentLoop:
         self._callback: Optional[Callable] = None
         self._session_id = memory_store.create_session()
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        logger.info("AgentLoop initialized")
     
     def on_event(self, event: ObserverEvent) -> None:
         """Receive events from observers."""
         self._event_buffer.append(event)
+        logger.info(f"Event received: {event.type} - {event.source}")
+        
         # 记录到数据库
         self.memory.add_event(
             self._session_id,
@@ -35,6 +39,7 @@ class AgentLoop:
         
         # 重要事件立即处理 - run async in thread pool
         if event.type in ["file_focus", "page_focus", "window_focus"]:
+            logger.info(f"Scheduling LLM analysis for: {event.type}")
             self._executor.submit(asyncio.run, self._process_events())
     
     async def _process_events(self) -> None:
@@ -44,21 +49,29 @@ class AgentLoop:
         
         events = self._event_buffer.copy()
         self._event_buffer.clear()
+        logger.info(f"Processing {len(events)} events")
         
         try:
             analysis = await self._analyze_events(events)
+            logger.info(f"LLM Analysis result: {analysis}")
             
             if analysis.get("should_remember"):
+                summary = analysis.get("summary", "")
+                memory_type = analysis.get("type", "episodic")
+                tags = analysis.get("tags", [])
+                logger.info(f"Adding memory: {summary[:50]}...")
                 self.memory.add_memory(
-                    content=analysis.get("summary", ""),
-                    memory_type=analysis.get("type", "episodic"),
-                    tags=analysis.get("tags", [])
+                    content=summary,
+                    memory_type=memory_type,
+                    tags=tags
                 )
             
             if analysis.get("should_ask_user") and self._callback:
-                self._callback(analysis.get("question", ""))
+                question = analysis.get("question", "")
+                logger.info(f"LLM question: {question}")
+                self._callback(question)
         except Exception as e:
-            print(f"[DEBUG] Error processing events: {e}")
+            logger.error(f"Error processing events: {e}")
     
     async def _analyze_events(self, events: List[ObserverEvent]) -> dict:
         """Use LLM to analyze events."""
@@ -66,6 +79,7 @@ class AgentLoop:
             f"- {e.observer}: {e.type} - {e.source.get('app', e.source.get('file', e.source.get('url', 'N/A')))}"
             for e in events[-10:]
         ])
+        logger.info(f"Sending to LLM: {event_summary[:100]}...")
         
         system_prompt = """你是一个工作助手。分析用户事件。
 
@@ -76,15 +90,17 @@ class AgentLoop:
         
         try:
             response = await self.llm.chat(messages, system_prompt)
+            logger.info(f"LLM Response: {response.content[:200]}...")
             return json.loads(response.content)
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.error(f"LLM JSON decode error: {e}")
             return {
                 "should_remember": False,
                 "should_ask_user": True,
                 "question": "LLM返回格式错误"
             }
         except Exception as e:
-            # Return error info so it can be displayed
+            logger.error(f"LLM call error: {e}")
             return {
                 "should_remember": False, 
                 "error": str(e)[:100],
