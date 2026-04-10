@@ -240,8 +240,13 @@ while True:
         )
         agent_loop = AgentLoop(llm_client, memory_store)
         console.print(f"[green]LLM enabled: {config.llm.provider}/{config.llm.model}[/green]")
+        if terminal_panel:
+            terminal_panel.add_status_message(f"LLM: {config.llm.provider}/{config.llm.model}", is_error=False)
     except Exception as e:
-        console.print(f"[yellow]LLM not available: {e}[/yellow]")
+        error_msg = str(e)[:50]
+        console.print(f"[yellow]LLM not available: {error_msg}[/yellow]")
+        if terminal_panel:
+            terminal_panel.add_status_message(f"LLM error: {error_msg}", is_error=True)
     
     # Callback for LLM questions
     def on_thought(thought: str):

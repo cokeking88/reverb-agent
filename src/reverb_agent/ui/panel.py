@@ -34,6 +34,11 @@ class TerminalPanel:
         if len(self._thoughts) > 15:
             self._thoughts.pop(0)
     
+    def add_status_message(self, message: str, is_error: bool = False) -> None:
+        """Add a status message to show in status panel."""
+        prefix = "[red]✗[/red] " if is_error else "[green]✓[/green] "
+        self._status = prefix + message
+    
     def add_memory(self, memory: str) -> None:
         self._memories.append(memory)
         if len(self._memories) > 15:
