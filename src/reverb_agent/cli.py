@@ -202,32 +202,38 @@ while True:
                             lines = f.readlines()
                         if lines:
                             latest = lines[-1].strip()
+                            print(f"[TAIL] Latest: '{latest}', Last: '{last_line}'")
                             if latest != last_line and ': ' in latest:
                                 last_line = latest
-                                # Parse time and app from log line
-                                parts = latest.split(': ', 1)
-                                if len(parts) == 2:
-                                    ts, app = parts
-                                    # Create event
-                                    event = ObserverEvent(
-                                        observer="system",
-                                        type="window_focus",
-                                        source={"app": app, "window": ""},
-                                        data={}
-                                    )
-                                    # Add to panel
-                                    if terminal_panel:
-                                        terminal_panel.add_event(event)
+                                print(f"[TAIL] New line detected!")
+                                # Parse time and app from log line (timestamp is first 8 chars)
+                                app = latest[9:].strip() if len(latest) > 9 else ""
+                                ts = latest[:8]
+                                # Create event
+                                event = ObserverEvent(
+                                    observer="system",
+                                    type="window_focus",
+                                    source={"app": app, "window": ""},
+                                    data={}
+                                )
+                                # Add to panel and agent_loop (needs async)
+                                if terminal_panel:
+                                    terminal_panel.add_event(event)
+                                if agent_loop:
+                                    print(f"[DEBUG] Calling agent_loop.on_event for {app}")
+                                    event_loop.create_task(agent_loop.on_event(event))
                 except:
                     pass
                 time.sleep(0.3)
         
-        tail_and_emit_thread = threading.Thread(target=tail_and_emit, daemon=True)
-        tail_and_emit_thread.start()
+        # Store tail function for later start
+        tail_func = tail_and_emit
     
     # Setup AgentLoop for LLM analysis
     llm_client = None
     agent_loop = None
+    event_loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(event_loop)
     try:
         config = load_config()
         db_path = config.data_dir / "reverb.db"
@@ -238,7 +244,7 @@ while True:
             endpoint=config.llm.endpoint,
             api_key=config.llm.api_key
         )
-        agent_loop = AgentLoop(llm_client, memory_store)
+        agent_loop = AgentLoop(llm_client, memory_store, event_loop)
         console.print(f"[green]LLM enabled: {config.llm.provider}/{config.llm.model}[/green]")
         if terminal_panel:
             terminal_panel.add_status_message(f"LLM: {config.llm.provider}/{config.llm.model}", is_error=False)
@@ -256,11 +262,17 @@ while True:
     if agent_loop:
         agent_loop.set_callback(on_thought)
     
+    # Start system observer tail after agent_loop is ready
+    if "system" in enabled:
+        tail_thread = threading.Thread(target=tail_func, daemon=True)
+        tail_thread.start()
+    
     # Event handler - send to both panel and AgentLoop
     def on_event(event: ObserverEvent):
         if terminal_panel:
             terminal_panel.add_event(event)
         if agent_loop:
+            print(f'EVENT: {event.type} - {event.source}')  # Debug
             agent_loop.on_event(event)
     
     registry.on_event(on_event)

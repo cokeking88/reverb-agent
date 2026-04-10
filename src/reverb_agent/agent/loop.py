@@ -12,12 +12,13 @@ from reverb_agent.agent.memory import MemoryStore
 class AgentLoop:
     """Agent loop for processing observer events and learning."""
     
-    def __init__(self, llm_client: LLMClient, memory_store: MemoryStore):
+    def __init__(self, llm_client: LLMClient, memory_store: MemoryStore, loop=None):
         self.llm = llm_client
         self.memory = memory_store
         self._event_buffer: List[ObserverEvent] = []
         self._callback: Optional[Callable] = None
         self._session_id = memory_store.create_session()
+        self._loop = loop or asyncio.get_event_loop()
     
     def on_event(self, event: ObserverEvent) -> None:
         """Receive events from observers."""
@@ -33,10 +34,11 @@ class AgentLoop:
         
         # 重要事件立即处理
         if event.type in ["file_focus", "page_focus", "window_focus"]:
-            asyncio.create_task(self._process_events())
+            self._loop.create_task(self._process_events())
     
     async def _process_events(self) -> None:
         """Process buffered events."""
+        print(f"[DEBUG] _process_events called, buffer: {len(self._event_buffer)}")
         if not self._event_buffer:
             return
         
