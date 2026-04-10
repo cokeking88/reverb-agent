@@ -1,6 +1,7 @@
 """CLI entry point for Reverb Agent."""
 
 import asyncio
+import os
 import threading
 import time
 
@@ -125,11 +126,69 @@ def observe(interval, observers, browser, panel):
         except Exception as e:
             console.print(f"[yellow]Warning: Could not enable Feishu observer: {e}[/yellow]")
     
+    # System observer - start daemon and tail log
+    if "system" in enabled:
+        import subprocess
+        import threading
+        
+        # Check if daemon already running
+        daemon_check = subprocess.run(
+            ["pgrep", "-f", "reverb_daemon.py"],
+            capture_output=True
+        )
+        
+        if daemon_check.returncode != 0:
+            # Start daemon detached in /tmp - this is the key!
+            subprocess.Popen(
+                ["/usr/bin/python3", "/tmp/reverb_daemon.py"],
+                cwd="/tmp",
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True
+            )
+            console.print("[yellow]Started system monitor[/yellow]")
+        
+# Tail the log file and add to event stream
+        LOG = "/tmp/reverb_daemon.log"
+        
+        def tail_and_emit():
+            import os
+            last_line = ""
+            while True:
+                try:
+                    if os.path.exists(LOG):
+                        with open(LOG, 'r') as f:
+                            lines = f.readlines()
+                        if lines:
+                            latest = lines[-1].strip()
+                            if latest != last_line and ': ' in latest:
+                                last_line = latest
+                                # Parse time and app from log line
+                                parts = latest.split(': ', 1)
+                                if len(parts) == 2:
+                                    ts, app = parts
+                                    # Create event
+                                    event = ObserverEvent(
+                                        observer="system",
+                                        type="window_focus",
+                                        source={"app": app, "window": ""},
+                                        data={}
+                                    )
+                                    # Add to panel
+                                    if terminal_panel:
+                                        terminal_panel.add_event(event)
+                except:
+                    pass
+                time.sleep(0.3)
+        
+        tail_and_emit_thread = threading.Thread(target=tail_and_emit, daemon=True)
+        tail_and_emit_thread.start()
+    
     # Event handler
     def on_event(event: ObserverEvent):
         if terminal_panel:
             terminal_panel.add_event(event)
-        console.print(f"[cyan]{event.observer}[/cyan]: {event.type} - {event.source.get('app', 'N/A')}")
     
     registry.on_event(on_event)
     

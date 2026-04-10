@@ -1,22 +1,27 @@
-"""System observer for macOS events using long-running AppleScript listener."""
+"""System observer for macOS window focus events using daemon poller."""
 
 import asyncio
+import subprocess
+import os
 from typing import List
 from reverb_agent.observers.base import Observer
 from reverb_agent.observers.events import ObserverEvent
 from reverb_agent.constants import Capability
 
 
+DAEMON_LOG = "/tmp/reverb_daemon.log"
+DAEMON_SCRIPT = "/tmp/reverb_daemon.py"
+
+
 class SystemObserver(Observer):
-    """Observer for system-level events on macOS using event-based listening."""
+    """Observer for system-level events on macOS using background daemon."""
     
-    def __init__(self, interval: int = 5):
+    def __init__(self, interval: int = 2):
         super().__init__("system", app_bundle_id=None)
         self._interval = interval
         self._task = None
         self._last_app = None
-        self._last_window = None
-        self._process = None
+        self._daemon_pid = None
     
     @property
     def capabilities(self) -> List[str]:
@@ -27,8 +32,8 @@ class SystemObserver(Observer):
     
     async def start(self) -> None:
         await super().start()
-        await self._start_listener()
-        self._task = asyncio.create_task(self._listen_loop())
+        await self._start_daemon()
+        self._task = asyncio.create_task(self._read_loop())
     
     async def stop(self) -> None:
         if self._task:
@@ -37,88 +42,84 @@ class SystemObserver(Observer):
                 await self._task
             except asyncio.CancelledError:
                 pass
-        if self._process:
-            self._process.terminate()
+        if self._daemon_pid:
             try:
-                await asyncio.wait_for(self._process.wait(), timeout=1.0)
-            except asyncio.TimeoutError:
-                self._process.kill()
-                await self._process.wait()
+                subprocess.run(["kill", str(self._daemon_pid)], timeout=1)
             except:
                 pass
         await super().stop()
     
-    async def _start_listener(self) -> None:
-        """Start long-running AppleScript listener for app focus events."""
-        script = '''
-        on run
-            set lastApp to ""
-            
-            tell application "System Events"
-                repeat
-                    try
-                        set frontApp to first application process whose frontmost is true
-                        set appName to name of frontApp
-                        
-                        if appName is not equal to lastApp then
-                            set lastApp to appName
-                            set windowTitle to ""
-                            try
-                                set windowTitle to name of first window of frontApp
-                            end try
-                            -- Use stdout to communicate
-                            log appName & "|||" & windowTitle
-                        end if
-                    end try
-                    delay 0.3
-                end repeat
-            end tell
-        end run
-        '''
-        
-        self._process = await asyncio.create_subprocess_exec(
-            "osascript", "-e", script,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            stdin=asyncio.subprocess.DEVNULL
+    async def _start_daemon(self) -> None:
+        daemon_script = f"""#!/usr/bin/env python3
+import subprocess
+import os
+import time
+import sys
+
+LOG = "{DAEMON_LOG}"
+last = ''
+
+while True:
+    try:
+        result = subprocess.run(
+            ["osascript", "/tmp/test_front.app"],
+            capture_output=True, text=True, timeout=2
         )
+        app = result.stdout.strip()
+        if app and app != last:
+            with open(LOG, 'a') as f:
+                f.write(time.strftime("%H:%M:%S") + ': ' + app + '\\n')
+            last = app
+    except:
+        pass
+    time.sleep(1)
+"""
+        
+        with open(DAEMON_SCRIPT, 'w') as f:
+            f.write(daemon_script)
+        os.chmod(DAEMON_SCRIPT, 0o755)
+        
+        proc = subprocess.Popen(
+            ["/usr/bin/python3", DAEMON_SCRIPT],
+            cwd="/tmp",
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True
+        )
+        self._daemon_pid = proc.pid
     
-    async def _listen_loop(self) -> None:
-        """Listen for events from AppleScript process."""
-        if not self._process or not self._process.stderr:
-            return
-            
+    async def _read_loop(self) -> None:
+        last_pos = 0
         while self._running:
             try:
-                line = await asyncio.wait_for(
-                    self._process.stderr.readline(),
-                    timeout=1.0
-                )
-                if not line:
-                    break
-                    
-                output = line.decode().strip()
-                if output and output != "|||":
-                    parts = output.split("|||")
-                    app_name = parts[0].strip() if len(parts) > 0 else ""
-                    window_title = parts[1].strip() if len(parts) > 1 else ""
-                    
-                    if app_name != self._last_app or window_title != self._last_window:
-                        self._last_app = app_name
-                        self._last_window = window_title
+                if os.path.exists(DAEMON_LOG):
+                    stat = os.stat(DAEMON_LOG)
+                    if stat.st_size > last_pos:
+                        with open(DAEMON_LOG, 'r') as f:
+                            f.seek(last_pos)
+                            new_lines = f.readlines()
+                        last_pos = stat.st_size
                         
-                        event = ObserverEvent(
-                            observer=self.name,
-                            type="window_focus",
-                            source={
-                                "app": app_name,
-                                "window": window_title,
-                            },
-                            data={}
-                        )
-                        self._emit(event)
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                print(f"Error listening: {e}")
-                break
+                        for line in new_lines:
+                            line = line.strip()
+                            if ':' in line:
+                                app = line.split(':', 1)[1].strip()
+                                if app and app != self._last_app:
+                                    self._last_app = app
+                                    self._emit_event(app, "")
+            except:
+                pass
+            await asyncio.sleep(0.5)
+    
+    def _emit_event(self, app_name: str, window_title: str) -> None:
+        event = ObserverEvent(
+            observer=self.name,
+            type="window_focus",
+            source={
+                "app": app_name,
+                "window": window_title,
+            },
+            data={}
+        )
+        self._emit(event)
