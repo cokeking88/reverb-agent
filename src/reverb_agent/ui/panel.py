@@ -128,15 +128,20 @@ class TerminalPanel:
         
         self._console.clear()
         
+        last_event_count = 0
         try:
-            with Live(self._layout, refresh_per_second=4, console=self._console) as live:
+            with Live(self._layout, refresh_per_second=2, console=self._console) as live:
                 while self._running:
                     try:
-                        self._layout["events"].update(self._render_event_panel())
+                        # Only re-render if events changed
+                        if len(self._events) != last_event_count:
+                            self._layout["events"].update(self._render_event_panel())
+                            last_event_count = len(self._events)
+                        
                         self._layout["thoughts"].update(self._render_thought_panel())
                         self._layout["memories"].update(self._render_memory_panel())
                         self._layout["status"].update(self._render_status_panel())
-                        await asyncio.sleep(0.25)
+                        await asyncio.sleep(0.5)
                     except Exception as e:
                         if self._running:
                             pass
