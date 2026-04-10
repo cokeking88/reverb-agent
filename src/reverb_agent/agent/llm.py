@@ -21,7 +21,7 @@ class LLMClient:
         self.endpoint = endpoint
         self.api_key = api_key
         
-        if provider == "openai":
+        if provider in ("openai", "openrouter"):
             try:
                 import openai
                 self._openai = openai
@@ -35,7 +35,7 @@ class LLMClient:
         """Send chat request."""
         if self.provider == "ollama":
             return await self._ollama_chat(messages, system)
-        elif self.provider == "openai":
+        elif self.provider in ("openai", "openrouter"):
             return await self._openai_chat(messages, system)
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
