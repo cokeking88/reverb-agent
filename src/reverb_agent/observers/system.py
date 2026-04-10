@@ -27,7 +27,7 @@ class SystemObserver(Observer):
     
     async def start(self) -> None:
         await super().start()
-        self._start_listener()
+        await self._start_listener()
         self._task = asyncio.create_task(self._listen_loop())
     
     async def stop(self) -> None:
@@ -45,7 +45,7 @@ class SystemObserver(Observer):
                 pass
         await super().stop()
     
-    def _start_listener(self) -> None:
+    async def _start_listener(self) -> None:
         """Start long-running AppleScript listener for app focus events."""
         script = '''
         on run
@@ -73,8 +73,8 @@ class SystemObserver(Observer):
         end run
         '''
         
-        self._process = asyncio.subprocess.Popen(
-            ["osascript", "-e", script],
+        self._process = await asyncio.create_subprocess_exec(
+            "osascript", "-e", script,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             stdin=asyncio.subprocess.DEVNULL
