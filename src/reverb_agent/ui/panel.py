@@ -128,17 +128,22 @@ class TerminalPanel:
         
         self._console.clear()
         
-        with Live(self._layout, refresh_per_second=4, console=self._console) as live:
-            while self._running:
-                try:
-                    self._layout["events"].update(self._render_event_panel())
-                    self._layout["thoughts"].update(self._render_thought_panel())
-                    self._layout["memories"].update(self._render_memory_panel())
-                    self._layout["status"].update(self._render_status_panel())
-                    await asyncio.sleep(0.25)
-                except Exception as e:
-                    print(f"Panel error: {e}")
-                    break
+        try:
+            with Live(self._layout, refresh_per_second=4, console=self._console) as live:
+                while self._running:
+                    try:
+                        self._layout["events"].update(self._render_event_panel())
+                        self._layout["thoughts"].update(self._render_thought_panel())
+                        self._layout["memories"].update(self._render_memory_panel())
+                        self._layout["status"].update(self._render_status_panel())
+                        await asyncio.sleep(0.25)
+                    except Exception as e:
+                        if self._running:
+                            pass
+                        else:
+                            break
+        except Exception:
+            pass
     
     def stop(self) -> None:
         """Stop the panel."""
