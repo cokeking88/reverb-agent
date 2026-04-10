@@ -138,6 +138,46 @@ def observe(interval, observers, browser, panel):
         )
         
         if daemon_check.returncode != 0:
+            # Create AppleScript if not exists
+            if not os.path.exists("/tmp/test_front.app"):
+                with open("/tmp/test_front.app", "w") as f:
+                    f.write("""tell application "System Events"
+    try
+        set x to name of first application process whose frontmost is true
+        return x
+    on error
+        return "ERR"
+    end try
+end tell""")
+            
+            # Also create daemon script in /tmp
+            daemon_script = '''#!/usr/bin/env python3
+import subprocess
+import os
+import time
+
+LOG = "/tmp/reverb_daemon.log"
+last = ""
+
+while True:
+    try:
+        result = subprocess.run(
+            ["osascript", "/tmp/test_front.app"],
+            capture_output=True, text=True, timeout=2
+        )
+        app = result.stdout.strip()
+        if app and app != last:
+            with open(LOG, "a") as f:
+                f.write(time.strftime("%H:%M:%S") + ": " + app + "\\n")
+            last = app
+    except:
+        pass
+    time.sleep(1)
+'''
+            with open("/tmp/reverb_daemon.py", "w") as f:
+                f.write(daemon_script)
+            os.chmod("/tmp/reverb_daemon.py", 0o755)
+            
             # Start daemon detached in /tmp - this is the key!
             subprocess.Popen(
                 ["/usr/bin/python3", "/tmp/reverb_daemon.py"],
