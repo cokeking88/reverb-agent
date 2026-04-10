@@ -126,22 +126,44 @@ class TerminalPanel:
         self._running = True
         self._layout = self._build_layout()
         
+        # Track counts to detect changes
+        last_event_count = 0
+        last_thought_count = 0
+        last_memory_count = 0
+        last_status = ""
+        
         self._console.clear()
         
-        last_event_count = 0
         try:
-            with Live(self._layout, refresh_per_second=2, console=self._console) as live:
+            # Lower refresh rate since we only update on changes
+            with Live(self._layout, refresh_per_second=1, console=self._console) as live:
                 while self._running:
                     try:
-                        # Only re-render if events changed
+                        changed = False
+                        
+                        # Check each panel and only update if changed
                         if len(self._events) != last_event_count:
                             self._layout["events"].update(self._render_event_panel())
                             last_event_count = len(self._events)
+                            changed = True
                         
-                        self._layout["thoughts"].update(self._render_thought_panel())
-                        self._layout["memories"].update(self._render_memory_panel())
-                        self._layout["status"].update(self._render_status_panel())
-                        await asyncio.sleep(0.5)
+                        if len(self._thoughts) != last_thought_count:
+                            self._layout["thoughts"].update(self._render_thought_panel())
+                            last_thought_count = len(self._thoughts)
+                            changed = True
+                        
+                        if len(self._memories) != last_memory_count:
+                            self._layout["memories"].update(self._render_memory_panel())
+                            last_memory_count = len(self._memories)
+                            changed = True
+                        
+                        if self._status != last_status:
+                            self._layout["status"].update(self._render_status_panel())
+                            last_status = self._status
+                            changed = True
+                        
+                        # Only sleep if something changed, otherwise longer sleep
+                        await asyncio.sleep(1.0 if changed else 2.0)
                     except Exception as e:
                         if self._running:
                             pass
