@@ -40,6 +40,9 @@ class SystemObserver(Observer):
         if self._process:
             self._process.terminate()
             try:
+                await asyncio.wait_for(self._process.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                self._process.kill()
                 await self._process.wait()
             except:
                 pass

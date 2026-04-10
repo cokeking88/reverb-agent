@@ -137,7 +137,16 @@ def observe(interval, observers, browser, panel):
     panel_thread = None
     if terminal_panel:
         terminal_panel.update_status("Observers starting...")
-        panel_thread = threading.Thread(target=lambda: asyncio.run(terminal_panel.run()))
+        
+        def run_panel():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(terminal_panel.run())
+            finally:
+                loop.close()
+        
+        panel_thread = threading.Thread(target=run_panel)
         panel_thread.start()
         time.sleep(0.5)
     
@@ -145,11 +154,16 @@ def observe(interval, observers, browser, panel):
     try:
         if panel:
             terminal_panel.update_status(f"Monitoring: {', '.join(enabled)}")
+        
+        # Start observers
         asyncio.run(registry.start_all())
+        
+        # Keep running
+        while True:
+            time.sleep(1)
+            
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopping observation...[/yellow]")
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
     finally:
         asyncio.run(registry.stop_all())
         if terminal_panel:
