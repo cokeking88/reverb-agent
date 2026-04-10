@@ -3,12 +3,12 @@
 import asyncio
 import subprocess
 from typing import List
-from reverb_agent.observers.ide_observer import IDEObserver
+from reverb_agent.observers.base import Observer
 from reverb_agent.observers.events import ObserverEvent
 from reverb_agent.constants import Capability
 
 
-class BrowserObserver(IDEObserver):
+class BrowserObserver(Observer):
     """Observer for browser events."""
     
     SUPPORTED_BROWSERS = {
@@ -22,6 +22,7 @@ class BrowserObserver(IDEObserver):
         super().__init__("browser", app_bundle_id=bundle_id)
         self._browser = browser
         self._interval = interval
+        self._task = None
         self._last_url = None
     
     @property

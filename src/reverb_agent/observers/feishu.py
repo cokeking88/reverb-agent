@@ -3,17 +3,18 @@
 import asyncio
 import subprocess
 from typing import List
-from reverb_agent.observers.ide_observer import IDEObserver
+from reverb_agent.observers.base import Observer
 from reverb_agent.observers.events import ObserverEvent
 from reverb_agent.constants import Capability
 
 
-class FeishuObserver(IDEObserver):
+class FeishuObserver(Observer):
     """Observer for Feishu/Lark desktop app."""
     
     def __init__(self, interval: int = 3):
         super().__init__("feishu", app_bundle_id="com.lark.lark")
         self._interval = interval
+        self._task = None
         self._last_window = None
     
     @property
