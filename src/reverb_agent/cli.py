@@ -202,26 +202,25 @@ while True:
                             lines = f.readlines()
                         if lines:
                             latest = lines[-1].strip()
-                            if latest != last_line and ': ' in latest:
+                            # Format is "HH:MM:SS: app" - find colon-space position
+                            idx = latest.find(': ')
+                            if idx > 0 and latest != last_line:
                                 last_line = latest
-                                # Parse time and app from log line (timestamp is first 8 chars)
-                                app = latest[9:].strip() if len(latest) > 9 else ""
-                                ts = latest[:8]
-                                # Create event
-                                event = ObserverEvent(
-                                    observer="system",
-                                    type="window_focus",
-                                    source={"app": app, "window": ""},
-                                    data={}
-                                )
-                                # Add to panel and agent_loop
-                                if terminal_panel:
-                                    terminal_panel.add_event(event)
-                                if agent_loop:
-                                    agent_loop.on_event(event)
+                                app = latest[idx+2:].strip()  # Get app after ": "
+                                if app:
+                                    event = ObserverEvent(
+                                        observer="system",
+                                        type="window_focus",
+                                        source={"app": app, "window": ""},
+                                        data={}
+                                    )
+                                    if terminal_panel:
+                                        terminal_panel.add_event(event)
+                                    if agent_loop:
+                                        agent_loop.on_event(event)
                 except:
                     pass
-                time.sleep(0.3)
+                time.sleep(0.5)
         
         # Store tail function for later start
         tail_func = tail_and_emit
@@ -273,7 +272,6 @@ while True:
         if terminal_panel:
             terminal_panel.add_event(event)
         if agent_loop:
-            print(f'EVENT: {event.type} - {event.source}')  # Debug
             agent_loop.on_event(event)
     
     registry.on_event(on_event)
