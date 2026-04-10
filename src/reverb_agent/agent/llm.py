@@ -64,17 +64,24 @@ class LLMClient:
                 )
     
     async def _openai_chat(self, messages: list[dict], system: Optional[str]) -> LLMResponse:
+        from openai import AsyncOpenAI
+        
+        client = AsyncOpenAI(
+            api_key=self.api_key,
+            base_url=self.endpoint or None
+        )
+        
         all_messages = []
         if system:
             all_messages.append({"role": "system", "content": system})
         all_messages.extend(messages)
         
-        response = await self._openai.ChatCompletion.acreate(
+        response = await client.chat.completions.create(
             model=self.model,
             messages=all_messages
         )
         return LLMResponse(
             content=response.choices[0].message.content,
             model=response.model,
-            usage=response.usage.to_dict() if response.usage else None
+            usage=response.usage.model_dump() if response.usage else None
         )
