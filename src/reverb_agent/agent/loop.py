@@ -65,20 +65,10 @@ class AgentLoop:
             for e in events[-10:]
         ])
         
-        system_prompt = """你是一个工作助手。分析以下用户事件，判断是否需要记忆。
+        system_prompt = """你是一个工作助手。分析用户事件。
 
-分析用户的行为模式，如果是重复性工作，考虑创建 Skill。
-如果需要确认用户意图，提出问题。
-
-返回 JSON:
-{
-  "should_remember": true/false,
-  "summary": "事件总结",
-  "type": "episodic/semantic",
-  "tags": ["tag1", "tag2"],
-  "should_ask_user": true/false,
-  "question": "如果需要问用户问题"
-}"""
+直接返回以下格式的JSON，不要其他内容：
+{"should_remember": false, "summary": "简单总结", "type": "episodic", "tags": [], "should_ask_user": false, "question": ""}"""
         
         messages = [{"role": "user", "content": f"事件:\n{event_summary}"}]
         
@@ -86,10 +76,19 @@ class AgentLoop:
             response = await self.llm.chat(messages, system_prompt)
             return json.loads(response.content)
         except json.JSONDecodeError:
-            return {"should_remember": False}
+            return {
+                "should_remember": False,
+                "should_ask_user": True,
+                "question": "LLM返回格式错误"
+            }
         except Exception as e:
-            print(f"LLM error: {e}")
-            return {"should_remember": False}
+            # Return error info so it can be displayed
+            return {
+                "should_remember": False, 
+                "error": str(e)[:100],
+                "should_ask_user": True,
+                "question": f"LLM错误: {str(e)[:50]}"
+            }
     
     def set_callback(self, callback: Callable) -> None:
         """Set callback for user questions."""
