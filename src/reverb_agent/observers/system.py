@@ -85,13 +85,13 @@ class SystemObserver(Observer):
     
     async def _listen_loop(self) -> None:
         """Listen for events from AppleScript process."""
-        if not self._process or not self._process.stdout:
+        if not self._process or not self._process.stderr:
             return
             
         while self._running:
             try:
                 line = await asyncio.wait_for(
-                    self._process.stdout.readline(),
+                    self._process.stderr.readline(),
                     timeout=1.0
                 )
                 if not line:
