@@ -1,6 +1,8 @@
 """CLI entry point for Reverb Agent."""
 
 import asyncio
+import threading
+import time
 
 import click
 from rich.console import Console
@@ -18,6 +20,7 @@ from reverb_agent.observers.intellij import IntelliJObserver
 from reverb_agent.observers.browser import BrowserObserver
 from reverb_agent.observers.feishu import FeishuObserver
 from reverb_agent.observers.events import ObserverEvent
+from reverb_agent.ui import TerminalPanel
 
 console = Console()
 
@@ -79,20 +82,27 @@ def init():
 @click.option("--interval", default=5, help="Polling interval in seconds")
 @click.option("--observers", default="system,vscode,intellij,browser,feishu", help="Comma-separated list of observers to enable")
 @click.option("--browser", default="Google Chrome", help="Browser to monitor (Google Chrome, Safari, Microsoft Edge)")
-def observe(interval, observers, browser):
+@click.option("--panel/--no-panel", default=True, help="Show terminal panel UI")
+def observe(interval, observers, browser, panel):
     """Start observation mode."""
     enabled = [o.strip() for o in observers.split(",")]
     console.print(f"[green]Starting observation (interval: {interval}s)...[/green]")
     console.print(f"[green]Enabled observers: {', '.join(enabled)}[/green]")
+    console.print(f"[green]Panel: {'enabled' if panel else 'disabled'}[/green]")
     
     registry = ObserverRegistry()
+    
+    # Create terminal panel
+    terminal_panel = None
+    if panel:
+        terminal_panel = TerminalPanel()
     
     # Register observers based on selection
     if "system" in enabled:
         registry.register(SystemObserver(interval=interval))
     if "vscode" in enabled:
         try:
-            registry.register(VSCodeObserver(interval=IDE_OBSERVER_INTERVAL))  # IDEs use shorter interval
+            registry.register(VSCodeObserver(interval=IDE_OBSERVER_INTERVAL))
             console.print("[green]VSCode observer enabled[/green]")
         except Exception as e:
             console.print(f"[yellow]Warning: Could not enable VSCode observer: {e}[/yellow]")
@@ -115,19 +125,33 @@ def observe(interval, observers, browser):
         except Exception as e:
             console.print(f"[yellow]Warning: Could not enable Feishu observer: {e}[/yellow]")
     
-    # Register global event handler
+    # Event handler
     def on_event(event: ObserverEvent):
+        if terminal_panel:
+            terminal_panel.add_event(event)
         console.print(f"[cyan]{event.observer}[/cyan]: {event.type} - {event.source.get('app', 'N/A')}")
     
     registry.on_event(on_event)
     
+    # Start panel in background thread
+    panel_thread = None
+    if terminal_panel:
+        terminal_panel.update_status("Observers starting...")
+        panel_thread = threading.Thread(target=lambda: asyncio.run(terminal_panel.run()), daemon=True)
+        panel_thread.start()
+        time.sleep(0.5)
+    
     # Run until interrupted
     try:
+        if panel:
+            terminal_panel.update_status(f"Monitoring: {', '.join(enabled)}")
         asyncio.run(registry.start_all())
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopping observation...[/yellow]")
     finally:
         asyncio.run(registry.stop_all())
+        if terminal_panel:
+            terminal_panel.stop()
 
 
 @main.command()
