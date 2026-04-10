@@ -202,10 +202,8 @@ while True:
                             lines = f.readlines()
                         if lines:
                             latest = lines[-1].strip()
-                            print(f"[TAIL] Latest: '{latest}', Last: '{last_line}'")
                             if latest != last_line and ': ' in latest:
                                 last_line = latest
-                                print(f"[TAIL] New line detected!")
                                 # Parse time and app from log line (timestamp is first 8 chars)
                                 app = latest[9:].strip() if len(latest) > 9 else ""
                                 ts = latest[:8]
@@ -216,12 +214,11 @@ while True:
                                     source={"app": app, "window": ""},
                                     data={}
                                 )
-                                # Add to panel and agent_loop (needs async)
+                                # Add to panel and agent_loop
                                 if terminal_panel:
                                     terminal_panel.add_event(event)
                                 if agent_loop:
-                                    print(f"[DEBUG] Calling agent_loop.on_event for {app}")
-                                    event_loop.create_task(agent_loop.on_event(event))
+                                    agent_loop.on_event(event)
                 except:
                     pass
                 time.sleep(0.3)
@@ -232,15 +229,6 @@ while True:
     # Setup AgentLoop for LLM analysis
     llm_client = None
     agent_loop = None
-    event_loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(event_loop)
-    
-    # Run event loop in background
-    def run_loop():
-        event_loop.run_forever()
-    
-    loop_thread = threading.Thread(target=run_loop, daemon=True)
-    loop_thread.start()
     try:
         config = load_config()
         db_path = config.data_dir / "reverb.db"
@@ -251,13 +239,19 @@ while True:
             endpoint=config.llm.endpoint,
             api_key=config.llm.api_key
         )
-        agent_loop = AgentLoop(llm_client, memory_store, event_loop)
-        console.print(f"[green]LLM enabled: {config.llm.provider}/{config.llm.model}[/green]")
+        agent_loop = AgentLoop(llm_client, memory_store)
+        
+        # Build status message
+        status_msg = f"{config.llm.provider}/{config.llm.model}"
+        if config.llm.endpoint:
+            status_msg += f" ({config.llm.endpoint})"
+        
+        console.print(f"[green]LLM enabled: {status_msg}[/green]")
         if terminal_panel:
-            terminal_panel.add_status_message(f"LLM: {config.llm.provider}/{config.llm.model}", is_error=False)
+            terminal_panel.add_status_message(f"LLM: {status_msg}", is_error=False)
     except Exception as e:
-        error_msg = str(e)[:50]
-        console.print(f"[yellow]LLM not available: {error_msg}[/yellow]")
+        error_msg = str(e)[:60]
+        console.print(f"[yellow]LLM error: {error_msg}[/yellow]")
         if terminal_panel:
             terminal_panel.add_status_message(f"LLM error: {error_msg}", is_error=True)
     
@@ -271,7 +265,6 @@ while True:
     
     # Start system observer tail after agent_loop is ready
     if "system" in enabled:
-        print(f"[CLI] Starting tail with agent_loop: {agent_loop}")
         tail_thread = threading.Thread(target=tail_func, daemon=True)
         tail_thread.start()
     

@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import concurrent.futures
 import uuid
 from typing import List, Optional, Callable
 from reverb_agent.observers.events import ObserverEvent
@@ -12,17 +13,16 @@ from reverb_agent.agent.memory import MemoryStore
 class AgentLoop:
     """Agent loop for processing observer events and learning."""
     
-    def __init__(self, llm_client: LLMClient, memory_store: MemoryStore, loop=None):
+    def __init__(self, llm_client: LLMClient, memory_store: MemoryStore):
         self.llm = llm_client
         self.memory = memory_store
         self._event_buffer: List[ObserverEvent] = []
         self._callback: Optional[Callable] = None
         self._session_id = memory_store.create_session()
-        self._loop = loop or asyncio.get_event_loop()
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
     
     def on_event(self, event: ObserverEvent) -> None:
         """Receive events from observers."""
-        print(f"[DEBUG] on_event called for {event.type}")
         self._event_buffer.append(event)
         # 记录到数据库
         self.memory.add_event(
@@ -33,18 +33,12 @@ class AgentLoop:
             event.data
         )
         
-        # 重要事件立即处理 - use existing event loop
+        # 重要事件立即处理 - run async in thread pool
         if event.type in ["file_focus", "page_focus", "window_focus"]:
-            if self._loop.is_running():
-                self._loop.create_task(self._process_events())
-            else:
-                # Loop not running - run directly
-                asyncio.run(self._process_events())
+            self._executor.submit(asyncio.run, self._process_events())
     
     async def _process_events(self) -> None:
         """Process buffered events."""
-        print(f"[DEBUG] _process_events called with {len(self._event_buffer)} events")
-        print(f"[DEBUG] LLM client: {self.llm}")
         if not self._event_buffer:
             return
         
@@ -53,7 +47,6 @@ class AgentLoop:
         
         try:
             analysis = await self._analyze_events(events)
-            print(f"[DEBUG] Analysis result: {analysis}")
             
             if analysis.get("should_remember"):
                 self.memory.add_memory(
@@ -63,9 +56,7 @@ class AgentLoop:
                 )
             
             if analysis.get("should_ask_user") and self._callback:
-                q = analysis.get("question", "")
-                print(f"[DEBUG] Calling callback with: {q}")
-                self._callback(q)
+                self._callback(analysis.get("question", ""))
         except Exception as e:
             print(f"[DEBUG] Error processing events: {e}")
     
