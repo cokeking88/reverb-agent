@@ -1,4 +1,4 @@
-"""System observer for macOS events."""
+"""System observer for macOS events using long-running AppleScript listener."""
 
 import asyncio
 from typing import List
@@ -8,7 +8,7 @@ from reverb_agent.constants import Capability
 
 
 class SystemObserver(Observer):
-    """Observer for system-level events on macOS."""
+    """Observer for system-level events on macOS using event-based listening."""
     
     def __init__(self, interval: int = 5):
         super().__init__("system", app_bundle_id=None)
@@ -16,6 +16,7 @@ class SystemObserver(Observer):
         self._task = None
         self._last_app = None
         self._last_window = None
+        self._process = None
     
     @property
     def capabilities(self) -> List[str]:
@@ -26,7 +27,8 @@ class SystemObserver(Observer):
     
     async def start(self) -> None:
         await super().start()
-        self._task = asyncio.create_task(self._poll_loop())
+        self._start_listener()
+        self._task = asyncio.create_task(self._listen_loop())
     
     async def stop(self) -> None:
         if self._task:
@@ -35,56 +37,85 @@ class SystemObserver(Observer):
                 await self._task
             except asyncio.CancelledError:
                 pass
+        if self._process:
+            self._process.terminate()
+            try:
+                await self._process.wait()
+            except:
+                pass
         await super().stop()
     
-    async def _poll_loop(self) -> None:
-        """Poll for active application changes."""
-        while self._running:
-            try:
-                await self._check_active_app()
-            except Exception as e:
-                print(f"Error checking active app: {e}")
-            await asyncio.sleep(self._interval)
-    
-    async def _check_active_app(self) -> None:
-        """Check the currently active application."""
+    def _start_listener(self) -> None:
+        """Start long-running AppleScript listener for app focus events."""
         script = '''
-        tell application "System Events"
-            set frontApp to first application process whose frontmost is true
-            set appName to name of frontApp
-            set windowTitle to ""
-            try
-                set windowTitle to name of first window of frontApp
-            end try
-            return appName & "|||" & windowTitle
-        end tell
+        on run
+            set lastApp to ""
+            
+            tell application "System Events"
+                repeat
+                    try
+                        set frontApp to first application process whose frontmost is true
+                        set appName to name of frontApp
+                        
+                        if appName is not equal to lastApp then
+                            set lastApp to appName
+                            set windowTitle to ""
+                            try
+                                set windowTitle to name of first window of frontApp
+                            end try
+                            -- Use stdout to communicate
+                            log appName & "|||" & windowTitle
+                        end if
+                    end try
+                    delay 0.3
+                end repeat
+            end tell
+        end run
         '''
         
-        result = await asyncio.create_subprocess_exec(
-            "osascript", "-e", script,
+        self._process = asyncio.subprocess.Popen(
+            ["osascript", "-e", script],
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL
         )
-        stdout, _ = await result.communicate()
-        
-        if result.returncode == 0:
-            output = stdout.decode().strip()
-            if output:
-                parts = output.split("|||")
-                app_name = parts[0] if len(parts) > 0 else ""
-                window_title = parts[1] if len(parts) > 1 else ""
-                
-                if app_name != self._last_app or window_title != self._last_window:
-                    self._last_app = app_name
-                    self._last_window = window_title
+    
+    async def _listen_loop(self) -> None:
+        """Listen for events from AppleScript process."""
+        if not self._process or not self._process.stdout:
+            return
+            
+        while self._running:
+            try:
+                line = await asyncio.wait_for(
+                    self._process.stdout.readline(),
+                    timeout=1.0
+                )
+                if not line:
+                    break
                     
-                    event = ObserverEvent(
-                        observer=self.name,
-                        type="window_focus",
-                        source={
-                            "app": app_name,
-                            "window": window_title,
-                        },
-                        data={}
-                    )
-                    self._emit(event)
+                output = line.decode().strip()
+                if output and output != "|||":
+                    parts = output.split("|||")
+                    app_name = parts[0].strip() if len(parts) > 0 else ""
+                    window_title = parts[1].strip() if len(parts) > 1 else ""
+                    
+                    if app_name != self._last_app or window_title != self._last_window:
+                        self._last_app = app_name
+                        self._last_window = window_title
+                        
+                        event = ObserverEvent(
+                            observer=self.name,
+                            type="window_focus",
+                            source={
+                                "app": app_name,
+                                "window": window_title,
+                            },
+                            data={}
+                        )
+                        self._emit(event)
+            except asyncio.TimeoutError:
+                continue
+            except Exception as e:
+                print(f"Error listening: {e}")
+                break
