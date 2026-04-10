@@ -225,10 +225,38 @@ while True:
         tail_and_emit_thread = threading.Thread(target=tail_and_emit, daemon=True)
         tail_and_emit_thread.start()
     
-    # Event handler
+    # Setup AgentLoop for LLM analysis
+    llm_client = None
+    agent_loop = None
+    try:
+        config = load_config()
+        db_path = config.data_dir / "reverb.db"
+        memory_store = MemoryStore(str(db_path))
+        llm_client = LLMClient(
+            provider=config.llm.provider,
+            model=config.llm.model,
+            endpoint=config.llm.endpoint,
+            api_key=config.llm.api_key
+        )
+        agent_loop = AgentLoop(llm_client, memory_store)
+        console.print(f"[green]LLM enabled: {config.llm.provider}/{config.llm.model}[/green]")
+    except Exception as e:
+        console.print(f"[yellow]LLM not available: {e}[/yellow]")
+    
+    # Callback for LLM questions
+    def on_thought(thought: str):
+        if thought and terminal_panel:
+            terminal_panel.add_thought(thought)
+    
+    if agent_loop:
+        agent_loop.set_callback(on_thought)
+    
+    # Event handler - send to both panel and AgentLoop
     def on_event(event: ObserverEvent):
         if terminal_panel:
             terminal_panel.add_event(event)
+        if agent_loop:
+            agent_loop.on_event(event)
     
     registry.on_event(on_event)
     
