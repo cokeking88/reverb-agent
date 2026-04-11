@@ -25,6 +25,7 @@ class AgentLoop:
         self._debounce_cancel_event = threading.Event()
         self._debounce_task_thread = None
         self._debounce_delay = 2.0
+        self._thread_lock = threading.Lock()
         logger.info("AgentLoop initialized")
 
     def on_event(self, event: ObserverEvent) -> None:
@@ -45,27 +46,31 @@ class AgentLoop:
         if event.type in ["file_focus", "page_focus", "window_focus"]:
             logger.info(f"Scheduling LLM analysis for: {event.type} (debounced)")
 
-            # Cancel the previous run if possible (it's in a thread so we use an event flag)
-            if hasattr(self, '_debounce_cancel_event'):
-                self._debounce_cancel_event.set()
+            with self._thread_lock:
+                # Cancel the previous run if possible (it's in a thread so we use an event flag)
+                if hasattr(self, '_debounce_cancel_event'):
+                    self._debounce_cancel_event.set()
 
-            self._debounce_cancel_event = threading.Event()
+                self._debounce_cancel_event = threading.Event()
 
-            # The on_event method might be called from different threads (like observers or UI)
-            # Create a task safely in a background event loop or thread
-            def _run_debounced(cancel_event):
-                # wait for debounce delay
-                if cancel_event.wait(self._debounce_delay):
-                    return # cancelled
+                # The on_event method might be called from different threads (like observers or UI)
+                # Create a task safely in a background event loop or thread
+                def _run_debounced(cancel_event):
+                    # wait for debounce delay
+                    if cancel_event.wait(self._debounce_delay):
+                        return # cancelled
 
-                # proceed to run
-                asyncio.run(self._process_events())
+                    # proceed to run
+                    try:
+                        asyncio.run(self._process_events())
+                    except Exception as e:
+                        logger.error(f"Error in debounced task: {e}")
 
-            self._debounce_task_thread = threading.Thread(
-                target=_run_debounced,
-                args=(self._debounce_cancel_event,)
-            )
-            self._debounce_task_thread.start()
+                self._debounce_task_thread = threading.Thread(
+                    target=_run_debounced,
+                    args=(self._debounce_cancel_event,)
+                )
+                self._debounce_task_thread.start()
 
     async def _process_events(self) -> None:
         """Process buffered events."""
@@ -75,7 +80,11 @@ class AgentLoop:
         events = self._event_buffer.copy()
         self._event_buffer.clear()
         logger.info(f"Processing {len(events)} events")
-        
+
+        # Don't proceed if events list is too short or just contains the trigger
+        if not events:
+            return
+
         try:
             analysis = await self._analyze_events(events)
             logger.info(f"LLM Analysis result: {analysis}")
