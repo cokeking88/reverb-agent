@@ -21,7 +21,9 @@ class AgentLoop:
         self._callback: Optional[Callable] = None
         self._session_id = memory_store.create_session()
         self._analysis_tasks = set()
-        self._debounce_task: Optional[asyncio.Task] = None
+        import threading
+        self._debounce_cancel_event = threading.Event()
+        self._debounce_task_thread = None
         self._debounce_delay = 2.0
         logger.info("AgentLoop initialized")
 
@@ -43,26 +45,27 @@ class AgentLoop:
         if event.type in ["file_focus", "page_focus", "window_focus"]:
             logger.info(f"Scheduling LLM analysis for: {event.type} (debounced)")
 
-            if self._debounce_task and not self._debounce_task.done():
-                self._debounce_task.cancel()
+            # Cancel the previous run if possible (it's in a thread so we use an event flag)
+            if hasattr(self, '_debounce_cancel_event'):
+                self._debounce_cancel_event.set()
 
-            # We need to run create_task in the context of the running event loop
-            try:
-                loop = asyncio.get_running_loop()
-                self._debounce_task = loop.create_task(self._debounced_process_events())
-                self._analysis_tasks.add(self._debounce_task)
-                self._debounce_task.add_done_callback(self._analysis_tasks.discard)
-            except RuntimeError:
-                logger.error("Failed to create task: no running event loop")
+            self._debounce_cancel_event = threading.Event()
 
-    async def _debounced_process_events(self) -> None:
-        """Delay execution of processing to debounce frequent focus events."""
-        try:
-            await asyncio.sleep(self._debounce_delay)
-            await self._process_events()
-        except asyncio.CancelledError:
-            # Task was cancelled by a subsequent focus event, ignore
-            pass
+            # The on_event method might be called from different threads (like observers or UI)
+            # Create a task safely in a background event loop or thread
+            def _run_debounced(cancel_event):
+                # wait for debounce delay
+                if cancel_event.wait(self._debounce_delay):
+                    return # cancelled
+
+                # proceed to run
+                asyncio.run(self._process_events())
+
+            self._debounce_task_thread = threading.Thread(
+                target=_run_debounced,
+                args=(self._debounce_cancel_event,)
+            )
+            self._debounce_task_thread.start()
 
     async def _process_events(self) -> None:
         """Process buffered events."""
