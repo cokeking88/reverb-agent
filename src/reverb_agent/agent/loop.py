@@ -62,14 +62,25 @@ class AgentLoop:
 
                     # proceed to run
                     try:
-                        asyncio.run(self._process_events())
+                        logger.info("Debounce finished, running process_events")
+
+                        # Set up a new event loop for this thread if one doesn't exist
+                        try:
+                            loop = asyncio.get_event_loop()
+                        except RuntimeError:
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
+
+                        loop.run_until_complete(self._process_events())
                     except Exception as e:
-                        logger.error(f"Error in debounced task: {e}")
+                        import traceback
+                        logger.error(f"Error in debounced task: {e}\n{traceback.format_exc()}")
 
                 self._debounce_task_thread = threading.Thread(
                     target=_run_debounced,
                     args=(self._debounce_cancel_event,)
                 )
+                self._debounce_task_thread.daemon = True
                 self._debounce_task_thread.start()
 
     async def _process_events(self) -> None:
