@@ -60,44 +60,46 @@ class AgentLoop:
 
             # Schedule a proper async debounce safely
             try:
-                # Always use self._main_loop which we set from cli.py
-                if self._main_loop is None:
+                # If we don't have a reliable main event loop, spin up a one-off thread
+                # to handle the debounce and async execution without worrying about event loop sharing
+                import threading
+
+                # Setup debounce task state and lock
+                with self._thread_lock:
+                    if hasattr(self, '_debounce_cancel_event'):
+                        self._debounce_cancel_event.set()
+
+                    self._debounce_cancel_event = threading.Event()
+                    cancel_evt = self._debounce_cancel_event
+
+                def _run_debounce_thread(cancel_event):
+                    if cancel_event.wait(self._debounce_delay):
+                        return # Cancelled
+
+                    # Sleep finished, create a new event loop just for this execution
                     try:
-                        self._main_loop = asyncio.get_event_loop()
-                    except RuntimeError:
-                        # Fallback if no loop is available at all
-                        pass
+                        logger.info("Debounce sleep finished, executing process_events in thread")
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(self._process_events())
+                    except Exception as e:
+                        logger.error(f"Error executing debounced events: {e}")
+                    finally:
+                        try:
+                            loop.close()
+                        except:
+                            pass
 
-                if self._main_loop and self._main_loop.is_running():
-                    import threading
-                    # Check if we are running in the main thread with the main event loop
-                    if threading.current_thread() is threading.main_thread():
-                        self._debounce_task = self._main_loop.create_task(self._debounced_process_events())
-                    else:
-                        # Thread-safe scheduling to the main event loop
-                        self._debounce_task = asyncio.run_coroutine_threadsafe(
-                            self._debounced_process_events(), self._main_loop
-                        )
+                # Start the dedicated thread
+                t = threading.Thread(target=_run_debounce_thread, args=(cancel_evt,))
+                t.daemon = True
+                t.start()
 
-                    if hasattr(self._debounce_task, 'add_done_callback'):
-                        self._analysis_tasks.add(self._debounce_task)
-                        self._debounce_task.add_done_callback(self._analysis_tasks.discard)
-                else:
-                    logger.error("Failed to schedule debounce: No running main event loop found.")
             except Exception as e:
                 logger.error(f"Failed to schedule debounce: {e}")
 
-    async def _debounced_process_events(self) -> None:
-        """Delay execution of processing to debounce frequent focus events."""
-        try:
-            await asyncio.sleep(self._debounce_delay)
-            logger.info("Debounce sleep finished, executing process_events")
-            await self._process_events()
-        except asyncio.CancelledError:
-            # Task was cancelled by a subsequent focus event, ignore
-            pass
-        except Exception as e:
-            logger.error(f"Error in debounced processing: {e}")
+    # We can remove the unused async definition
+    # async def _debounced_process_events(self) -> None:
 
     async def _process_events(self) -> None:
         """Process buffered events."""
