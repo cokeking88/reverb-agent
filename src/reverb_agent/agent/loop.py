@@ -20,9 +20,9 @@ class AgentLoop:
         self._event_buffer: List[ObserverEvent] = []
         self._callback: Optional[Callable] = None
         self._session_id = memory_store.create_session()
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
+        self._analysis_tasks = set()
         logger.info("AgentLoop initialized")
-    
+
     def on_event(self, event: ObserverEvent) -> None:
         """Receive events from observers."""
         self._event_buffer.append(event)
@@ -37,10 +37,12 @@ class AgentLoop:
             event.data
         )
         
-        # 重要事件立即处理 - run async in thread pool
+        # 重要事件立即处理 - run async
         if event.type in ["file_focus", "page_focus", "window_focus"]:
             logger.info(f"Scheduling LLM analysis for: {event.type}")
-            self._executor.submit(asyncio.run, self._process_events())
+            task = asyncio.create_task(self._process_events())
+            self._analysis_tasks.add(task)
+            task.add_done_callback(self._analysis_tasks.discard)
     
     async def _process_events(self) -> None:
         """Process buffered events."""
