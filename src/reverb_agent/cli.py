@@ -262,20 +262,27 @@ while True:
     if agent_loop:
         agent_loop.set_callback(on_thought)
     
-    # Start system observer tail after agent_loop is ready
-    if "system" in enabled:
-        tail_thread = threading.Thread(target=tail_func, daemon=True)
-        tail_thread.start()
-    
     # Event handler - send to both panel and AgentLoop
     def on_event(event: ObserverEvent):
         if terminal_panel:
             terminal_panel.add_event(event)
         if agent_loop:
             agent_loop.on_event(event)
-    
+
     registry.on_event(on_event)
-    
+
+    # Store main event loop before blocking wait
+    main_loop = asyncio.get_event_loop()
+
+    # Pass main loop to agent_loop so it can schedule things from worker threads
+    if agent_loop:
+        agent_loop.set_main_loop(main_loop)
+
+    # Start system observer tail after agent_loop is ready
+    if "system" in enabled:
+        tail_thread = threading.Thread(target=tail_func, daemon=True, name="tail_and_emit")
+        tail_thread.start()
+
     # Start panel in background thread
     panel_thread = None
     if terminal_panel:
@@ -293,13 +300,6 @@ while True:
         panel_thread.start()
         time.sleep(0.5)
 
-    # Store main event loop before blocking wait
-    main_loop = asyncio.get_event_loop()
-
-    # Pass main loop to agent_loop so it can schedule things from worker threads
-    if agent_loop:
-        agent_loop.set_main_loop(main_loop)
-    
     # Run until interrupted
     try:
         if panel:

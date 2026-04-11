@@ -60,21 +60,30 @@ class AgentLoop:
 
             # Schedule a proper async debounce safely
             try:
-                loop = self._main_loop or asyncio.get_event_loop()
+                # Always use self._main_loop which we set from cli.py
+                if self._main_loop is None:
+                    try:
+                        self._main_loop = asyncio.get_event_loop()
+                    except RuntimeError:
+                        # Fallback if no loop is available at all
+                        pass
 
-                import threading
-                # Check if we are running in the main thread with the main event loop
-                if threading.current_thread() is threading.main_thread():
-                    self._debounce_task = loop.create_task(self._debounced_process_events())
+                if self._main_loop and self._main_loop.is_running():
+                    import threading
+                    # Check if we are running in the main thread with the main event loop
+                    if threading.current_thread() is threading.main_thread():
+                        self._debounce_task = self._main_loop.create_task(self._debounced_process_events())
+                    else:
+                        # Thread-safe scheduling to the main event loop
+                        self._debounce_task = asyncio.run_coroutine_threadsafe(
+                            self._debounced_process_events(), self._main_loop
+                        )
+
+                    if hasattr(self._debounce_task, 'add_done_callback'):
+                        self._analysis_tasks.add(self._debounce_task)
+                        self._debounce_task.add_done_callback(self._analysis_tasks.discard)
                 else:
-                    # Thread-safe scheduling to the main event loop
-                    self._debounce_task = asyncio.run_coroutine_threadsafe(
-                        self._debounced_process_events(), loop
-                    )
-
-                if hasattr(self._debounce_task, 'add_done_callback'):
-                    self._analysis_tasks.add(self._debounce_task)
-                    self._debounce_task.add_done_callback(self._analysis_tasks.discard)
+                    logger.error("Failed to schedule debounce: No running main event loop found.")
             except Exception as e:
                 logger.error(f"Failed to schedule debounce: {e}")
 
