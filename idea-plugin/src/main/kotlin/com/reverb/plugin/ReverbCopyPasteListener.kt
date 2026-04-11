@@ -10,14 +10,20 @@ import com.intellij.openapi.ide.CopyPasteManager
 import java.awt.datatransfer.DataFlavor
 
 class ReverbCopyPasteListener {
+
+
+
     fun register() {
         val actionManager = EditorActionManager.getInstance()
-        
+
         // Wrap Copy Action
         val originalCopy = actionManager.getActionHandler(IdeActions.ACTION_EDITOR_COPY)
         actionManager.setActionHandler(IdeActions.ACTION_EDITOR_COPY, object : EditorActionHandler() {
             override fun doExecute(editor: Editor, caret: Caret?, dataContext: DataContext?) {
                 originalCopy.execute(editor, caret, dataContext)
+
+
+                
                 val contents = CopyPasteManager.getInstance().contents
                 val text = contents?.getTransferData(DataFlavor.stringFlavor) as? String
                 if (text != null && text.length > 5) {

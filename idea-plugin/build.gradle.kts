@@ -6,10 +6,14 @@ plugins {
 
 group = "com.reverb"
 version = "1.0-SNAPSHOT"
-
 repositories {
+    maven { url = uri("https://maven.aliyun.com/repository/public") }
+    maven { url = uri("https://maven.aliyun.com/repository/google") }
+    maven { url = uri("https://maven.aliyun.com/repository/gradle-plugin") }
+    maven { url = uri("https://cache-redirector.jetbrains.com/www.jetbrains.com/intellij-repository/releases") }
     mavenCentral()
 }
+
 
 dependencies {
     implementation("org.java-websocket:Java-WebSocket:1.5.3")
@@ -19,7 +23,8 @@ dependencies {
 intellij {
     version.set("2023.3.4")
     type.set("IC")
-    plugins.set(listOf("java", "org.jetbrains.kotlin"))
+    plugins.set(listOf("java"))
+    updateSinceUntilBuild.set(false)
 }
 
 tasks {
@@ -32,13 +37,22 @@ tasks {
     }
 
     patchPluginXml {
-        sinceBuild.set("231")
-        untilBuild.set("242.*")
+        sinceBuild.set("233")
+        untilBuild.set("243.*")
     }
 
     // Fat jar configuration to include dependencies
     buildSearchableOptions {
         enabled = false
+    }
+
+    jar {
+        from(configurations.runtimeClasspath.get().map { if (it.isDirectory) it else zipTree(it) })
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    }
+
+    runIde {
+        jvmArgs = listOf("-Dreverb.debug=true")
     }
 }
 

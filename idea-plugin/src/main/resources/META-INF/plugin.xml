@@ -16,18 +16,16 @@
         <postStartupActivity implementation="com.reverb.plugin.ReverbStartupActivity"/>
     </extensions>
 
-    <applicationListeners>
+    <projectListeners>
         <listener class="com.reverb.plugin.ReverbFileEditorListener"
                   topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
-        <listener class="com.reverb.plugin.ReverbDocumentListener"
-                  topic="com.intellij.openapi.editor.event.DocumentListener"/>
-        <listener class="com.reverb.plugin.ReverbExecutionListener"
-                  topic="com.intellij.execution.ExecutionListener"/>
-    </applicationListeners>
-
-    <projectListeners>
         <listener class="com.reverb.plugin.ReverbBreakpointListener"
                   topic="com.intellij.xdebugger.breakpoints.XBreakpointListener"/>
     </projectListeners>
+
+    <applicationListeners>
+        <listener class="com.reverb.plugin.ReverbExecutionListener"
+                  topic="com.intellij.execution.ExecutionListener"/>
+    </applicationListeners>
 
 </idea-plugin>
