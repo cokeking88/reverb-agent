@@ -46,9 +46,14 @@ class AgentLoop:
             if self._debounce_task and not self._debounce_task.done():
                 self._debounce_task.cancel()
 
-            self._debounce_task = asyncio.create_task(self._debounced_process_events())
-            self._analysis_tasks.add(self._debounce_task)
-            self._debounce_task.add_done_callback(self._analysis_tasks.discard)
+            # We need to run create_task in the context of the running event loop
+            try:
+                loop = asyncio.get_running_loop()
+                self._debounce_task = loop.create_task(self._debounced_process_events())
+                self._analysis_tasks.add(self._debounce_task)
+                self._debounce_task.add_done_callback(self._analysis_tasks.discard)
+            except RuntimeError:
+                logger.error("Failed to create task: no running event loop")
 
     async def _debounced_process_events(self) -> None:
         """Delay execution of processing to debounce frequent focus events."""
