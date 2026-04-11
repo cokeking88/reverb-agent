@@ -50,6 +50,7 @@ class BrowserObserver(Observer):
 
     async def _handle_client(self, websocket):
         """Handle incoming connection from the Chrome extension."""
+        logger.info("Browser WS Client connected!")
         try:
             async for message in websocket:
                 if not self._running:
@@ -58,6 +59,8 @@ class BrowserObserver(Observer):
                     payload = json.loads(message)
                     event_type = payload.get("type")
                     data = payload.get("data", {})
+
+                    logger.info(f"Browser WS Message: {event_type}")
 
                     if event_type == "page_load":
                         url = data.get("url", "")

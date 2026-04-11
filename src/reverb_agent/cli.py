@@ -265,8 +265,20 @@ while True:
             if question and reply_callback:
                 web_panel.set_question(question, reply_callback)
 
+    def on_stream(event_type: str, content: str):
+        if web_panel:
+            if event_type == "start":
+                web_panel.start_stream()
+            elif event_type == "chunk":
+                web_panel.add_stream_chunk(content)
+            elif event_type == "end":
+                web_panel.end_stream()
+            elif event_type == "clear":
+                web_panel.clear_stream()
+
     if agent_loop:
         agent_loop.set_callback(on_thought)
+        agent_loop.set_stream_callback(on_stream)
 
     # Event handler - send to both panel and AgentLoop
     def on_event(event: ObserverEvent):

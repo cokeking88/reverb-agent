@@ -122,6 +122,63 @@ class LLMClient:
             }
         )
 
+    async def chat_stream(self, messages: list[dict], system: Optional[str] = None):
+        """Send chat request and stream response."""
+        if self.provider == "ollama":
+            url = f"{self.endpoint or 'http://localhost:11434'}/api/chat"
+            all_messages = []
+            if system:
+                all_messages.append({"role": "system", "content": system})
+            all_messages.extend(messages)
+
+            payload = {
+                "model": self.model,
+                "messages": all_messages,
+                "stream": True
+            }
+
+            session = await self._get_aiohttp_session()
+            async with session.post(url, json=payload) as resp:
+                async for line in resp.content:
+                    if line:
+                        try:
+                            data = json.loads(line)
+                            if "message" in data and "content" in data["message"]:
+                                yield data["message"]["content"]
+                        except json.JSONDecodeError:
+                            pass
+
+        elif self.provider in ("openai", "openrouter"):
+            all_messages = []
+            if system:
+                all_messages.append({"role": "system", "content": system})
+            all_messages.extend(messages)
+
+            response = await self._openai_client.chat.completions.create(
+                model=self.model,
+                messages=all_messages,
+                stream=True
+            )
+            async for chunk in response:
+                if chunk.choices and chunk.choices[0].delta.content is not None:
+                    yield chunk.choices[0].delta.content
+
+        elif self.provider == "anthropic":
+            kwargs = {
+                "model": self.model,
+                "max_tokens": 1024,
+                "messages": messages,
+            }
+            if system:
+                kwargs["system"] = system
+
+            async with self._anthropic_client.messages.stream(**kwargs) as stream:
+                async for text in stream.text_stream:
+                    if text:
+                        yield text
+        else:
+            raise ValueError(f"Unsupported provider: {self.provider}")
+
     async def close(self):
         """Clean up underlying HTTP connections."""
         if self._aiohttp_session and not self._aiohttp_session.closed:

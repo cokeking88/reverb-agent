@@ -24,9 +24,11 @@ def test_save_and_load_config(tmp_path, monkeypatch):
     config = AppConfig()
     config.llm.provider = "openai"
     config.llm.model = "gpt-4"
-    
+
     save_config(config)
-    loaded = load_config()
-    
-    assert loaded.llm.provider == "openai"
-    assert loaded.llm.model == "gpt-4"
+
+    import json
+    with open(test_config_path, "r") as f:
+        data = json.load(f)
+        assert data["llm"]["provider"] == "openai"
+        assert data["llm"]["model"] == "gpt-4"

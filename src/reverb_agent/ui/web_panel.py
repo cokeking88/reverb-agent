@@ -53,6 +53,8 @@ class WebUIPanel:
         self._thoughts: List[str] = []
         self._memories: List[str] = []
         self._status: str = "Initializing..."
+        self._current_stream = ""
+        self._is_streaming = False
         self._host = host
         self._port = port
         self._server = None
@@ -73,13 +75,29 @@ class WebUIPanel:
         if len(source) > 50:
             source = source[:50] + "..."
 
+        detail = ""
+        if event.type == "user_action":
+            action = event.data.get("action", "")
+            element = event.data.get("element", "")
+            text = event.data.get("text", "")
+            value = event.data.get("value", "")
+            detail = f"[{action}] {element} '{text or value}'"
+        elif event.type == "page_focus":
+            detail = f"Title: {event.data.get('title', '')}"
+        elif event.type == "user_reply":
+            detail = f"Q: {event.data.get('question', '')} | A: {event.data.get('reply', '')}"
+
+        if len(detail) > 100:
+            detail = detail[:100] + "..."
+
         time_str = datetime.fromtimestamp(event.timestamp).strftime("%H:%M:%S")
 
         evt_dict = {
             "time": time_str,
             "observer": event.observer,
             "source": source,
-            "type": event.type
+            "type": event.type,
+            "detail": detail
         }
         self._events.append(evt_dict)
         if len(self._events) > 30:
@@ -112,6 +130,28 @@ class WebUIPanel:
         """Set a question from LLM to ask the user."""
         self._current_question = question
         self._on_user_reply_callback = callback
+
+        # Log to thoughts
+        self.add_thought(f"🤔 {question}")
+        self._broadcast_state()
+
+    def start_stream(self) -> None:
+        self._is_streaming = True
+        self._current_stream = ""
+        self._broadcast_state()
+
+    def add_stream_chunk(self, chunk: str) -> None:
+        if self._is_streaming:
+            self._current_stream += chunk
+            self._broadcast_state()
+
+    def end_stream(self) -> None:
+        self._is_streaming = False
+        self._broadcast_state()
+
+    def clear_stream(self) -> None:
+        self._is_streaming = False
+        self._current_stream = ""
         self._broadcast_state()
 
     def clear_question(self) -> None:
@@ -124,6 +164,7 @@ class WebUIPanel:
         """Handle user reply from websocket."""
         if self._on_user_reply_callback and reply:
             try:
+                self.add_thought(f"👤 {reply}")
                 self._on_user_reply_callback(reply)
             except Exception as e:
                 logger.error(f"Error handling user reply: {e}")
@@ -140,7 +181,8 @@ class WebUIPanel:
             "thoughts": self._thoughts,
             "memories": self._memories,
             "status": self._status,
-            "question": self._current_question
+            "question": self._current_question,
+            "stream": self._current_stream if self._is_streaming else None
         }
 
         # Schedule broadcast safely in main loop
@@ -184,11 +226,17 @@ HTML_TEMPLATE = """
         .panel-title { margin-top: 0; border-bottom: 1px solid #444; padding-bottom: 10px; color: #fff; font-size: 16px; font-weight: bold; }
         .panel-content { flex-grow: 1; overflow-y: auto; font-family: "Menlo", "Monaco", monospace; font-size: 13px; line-height: 1.5; }
 
-        .event-row { display: flex; border-bottom: 1px solid #333; padding: 4px 0; }
-        .event-time { color: #569cd6; width: 70px; flex-shrink: 0; }
-        .event-source { color: #ce9178; flex-grow: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .event-row { display: flex; flex-direction: column; border-bottom: 1px solid #333; padding: 6px 0; }
+        .event-header { display: flex; align-items: baseline; }
+        .event-time { color: #569cd6; width: 70px; flex-shrink: 0; font-size: 12px; }
+        .event-source { color: #ce9178; flex-grow: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: bold; }
+        .event-detail { color: #888; font-size: 11px; margin-left: 70px; margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
         .thought-item { color: #dcdcaa; margin-bottom: 15px; border-left: 3px solid #dcdcaa; padding-left: 10px; }
+        .thought-item.user { color: #9cdcfe; border-left-color: #9cdcfe; }
+        .thought-item.bot { color: #569cd6; border-left-color: #569cd6; font-weight: bold; }
+        .thought-item.think { color: #c586c0; border-left-color: #c586c0; font-style: italic; white-space: pre-wrap; font-size: 12px; }
+        .thought-stream { color: #858585; margin-bottom: 15px; border-left: 3px solid #858585; padding-left: 10px; font-style: italic; white-space: pre-wrap; font-size: 12px; }
         .memory-item { color: #4ec9b0; margin-bottom: 10px; border-left: 3px solid #4ec9b0; padding-left: 10px; }
 
         #status-bar { margin-top: 20px; padding: 10px 15px; background: #007acc; color: white; border-radius: 6px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; }
@@ -276,20 +324,38 @@ HTML_TEMPLATE = """
                     // Update Events
                     eventsContainer.innerHTML = '';
                     [...data.events].reverse().forEach(e => {
+                        let detailHtml = '';
+                        if (e.detail && e.detail.trim() !== '') {
+                            detailHtml = `<div class="event-detail">${e.detail}</div>`;
+                        }
                         eventsContainer.innerHTML += `
                             <div class="event-row">
-                                <span class="event-time">${e.time}</span>
-                                <span class="event-source">[${e.observer}] ${e.source}</span>
+                                <div class="event-header">
+                                    <span class="event-time">${e.time}</span>
+                                    <span class="event-source">[${e.observer}] ${e.source} (${e.type})</span>
+                                </div>
+                                ${detailHtml}
                             </div>
                         `;
                     });
 
                     // Update Thoughts
                     thoughtsContainer.innerHTML = '';
+                    if (data.stream !== null) {
+                        thoughtsContainer.innerHTML += `<div class="thought-stream">${data.stream}</div>`;
+                    }
                     [...data.thoughts].reverse().forEach(t => {
-                        thoughtsContainer.innerHTML += `<div class="thought-item">${t}</div>`;
+                        if (t.startsWith("🤔")) {
+                            thoughtsContainer.innerHTML += `<div class="thought-item bot">${t}</div>`;
+                        } else if (t.startsWith("👤")) {
+                            thoughtsContainer.innerHTML += `<div class="thought-item user">${t}</div>`;
+                        } else if (t.startsWith("🧠")) {
+                            thoughtsContainer.innerHTML += `<div class="thought-item think">${t}</div>`;
+                        } else {
+                            thoughtsContainer.innerHTML += `<div class="thought-item">${t}</div>`;
+                        }
                     });
-                    if (data.thoughts.length === 0) thoughtsContainer.innerHTML = '<div style="color: #666">Waiting for analysis...</div>';
+                    if (data.thoughts.length === 0 && data.stream === null) thoughtsContainer.innerHTML = '<div style="color: #666">Waiting for analysis...</div>';
 
                     // Update Memories
                     memoriesContainer.innerHTML = '';
@@ -348,7 +414,8 @@ async def websocket_endpoint(websocket: WebSocket):
             "thoughts": _web_panel_instance._thoughts,
             "memories": _web_panel_instance._memories,
             "status": _web_panel_instance._status,
-            "question": _web_panel_instance._current_question
+            "question": _web_panel_instance._current_question,
+            "stream": _web_panel_instance._current_stream if _web_panel_instance._is_streaming else None
         }
         await websocket.send_text(json.dumps(state))
 
