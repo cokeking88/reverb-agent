@@ -23,16 +23,10 @@ def setup_logger(name: str) -> logging.Logger:
         '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     fh.setFormatter(formatter)
-    
-    # Console handler
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.INFO)
-    ch.setFormatter(formatter)
-    
+
     if not logger.handlers:
         logger.addHandler(fh)
-        logger.addHandler(ch)
-    
+
     return logger
 
 
