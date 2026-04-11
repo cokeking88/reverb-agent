@@ -21,6 +21,8 @@ class AgentLoop:
         self._callback: Optional[Callable] = None
         self._session_id = memory_store.create_session()
         self._analysis_tasks = set()
+        self._debounce_task: Optional[asyncio.Task] = None
+        self._debounce_delay = 2.0
         logger.info("AgentLoop initialized")
 
     def on_event(self, event: ObserverEvent) -> None:
@@ -39,11 +41,24 @@ class AgentLoop:
         
         # 重要事件立即处理 - run async
         if event.type in ["file_focus", "page_focus", "window_focus"]:
-            logger.info(f"Scheduling LLM analysis for: {event.type}")
-            task = asyncio.create_task(self._process_events())
-            self._analysis_tasks.add(task)
-            task.add_done_callback(self._analysis_tasks.discard)
-    
+            logger.info(f"Scheduling LLM analysis for: {event.type} (debounced)")
+
+            if self._debounce_task and not self._debounce_task.done():
+                self._debounce_task.cancel()
+
+            self._debounce_task = asyncio.create_task(self._debounced_process_events())
+            self._analysis_tasks.add(self._debounce_task)
+            self._debounce_task.add_done_callback(self._analysis_tasks.discard)
+
+    async def _debounced_process_events(self) -> None:
+        """Delay execution of processing to debounce frequent focus events."""
+        try:
+            await asyncio.sleep(self._debounce_delay)
+            await self._process_events()
+        except asyncio.CancelledError:
+            # Task was cancelled by a subsequent focus event, ignore
+            pass
+
     async def _process_events(self) -> None:
         """Process buffered events."""
         if not self._event_buffer:
