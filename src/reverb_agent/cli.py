@@ -280,7 +280,7 @@ while True:
     panel_thread = None
     if terminal_panel:
         terminal_panel.update_status("Observers starting...")
-        
+
         def run_panel():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
@@ -288,10 +288,17 @@ while True:
                 loop.run_until_complete(terminal_panel.run())
             finally:
                 loop.close()
-        
+
         panel_thread = threading.Thread(target=run_panel)
         panel_thread.start()
         time.sleep(0.5)
+
+    # Store main event loop before blocking wait
+    main_loop = asyncio.get_event_loop()
+
+    # Pass main loop to agent_loop so it can schedule things from worker threads
+    if agent_loop:
+        agent_loop.set_main_loop(main_loop)
     
     # Run until interrupted
     try:
