@@ -60,10 +60,6 @@ class AgentLoop:
 
             # Schedule a proper async debounce safely
             try:
-                # If we don't have a reliable main event loop, spin up a one-off thread
-                # to handle the debounce and async execution without worrying about event loop sharing
-                import threading
-
                 # Setup debounce task state and lock
                 with self._thread_lock:
                     if hasattr(self, '_debounce_cancel_event'):
@@ -71,6 +67,26 @@ class AgentLoop:
 
                     self._debounce_cancel_event = threading.Event()
                     cancel_evt = self._debounce_cancel_event
+
+                # Check if we can safely just use asyncio.run_coroutine_threadsafe
+                # with the main_loop that the cli set for us
+                if self._main_loop and self._main_loop.is_running():
+                    # Create a simple function to wait and then run
+                    async def wait_then_run():
+                        try:
+                            # Wait asynchronously without blocking threads
+                            await asyncio.sleep(self._debounce_delay)
+                            if not cancel_evt.is_set():
+                                logger.info("Debounce finished, running process_events")
+                                await self._process_events()
+                        except Exception as e:
+                            logger.error(f"Error in delayed run: {e}")
+
+                    # Schedule it safely into the main loop
+                    self._debounce_task = asyncio.run_coroutine_threadsafe(
+                        wait_then_run(), self._main_loop
+                    )
+                    return
 
                 def _run_debounce_thread(cancel_event):
                     if cancel_event.wait(self._debounce_delay):

@@ -275,11 +275,11 @@ while True:
     registry.on_event(on_event)
 
     # Store main event loop before blocking wait
-    main_loop = asyncio.get_event_loop()
+    main_loop = None
 
     # Pass main loop to agent_loop so it can schedule things from worker threads
     if agent_loop:
-        agent_loop.set_main_loop(main_loop)
+        agent_loop.set_main_loop(None)
 
     # Start system observer tail after agent_loop is ready
     if "system" in enabled:
@@ -307,18 +307,29 @@ while True:
     try:
         if panel:
             terminal_panel.update_status(f"Monitoring: {', '.join(enabled)}")
-        
-        # Start observers
-        asyncio.run(registry.start_all())
-        
-        # Keep running
-        while True:
-            time.sleep(1)
-            
+
+        async def main_runner():
+            nonlocal main_loop
+            main_loop = asyncio.get_running_loop()
+            if agent_loop:
+                agent_loop.set_main_loop(main_loop)
+
+            await registry.start_all()
+
+            # Keep running
+            while True:
+                await asyncio.sleep(1)
+
+        asyncio.run(main_runner())
+
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopping observation...[/yellow]")
     finally:
-        asyncio.run(registry.stop_all())
+        # Stop observers properly in a new loop if needed or just let it close
+        try:
+            asyncio.run(registry.stop_all())
+        except Exception:
+            pass
         if terminal_panel:
             terminal_panel.stop()
             if panel_thread:
