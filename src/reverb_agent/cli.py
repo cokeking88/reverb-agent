@@ -109,8 +109,11 @@ def observe(interval, observers, browser, panel):
             console.print(f"[yellow]Warning: Could not enable VSCode observer: {e}[/yellow]")
     if "intellij" in enabled:
         try:
+            import websockets
             registry.register(IntelliJObserver(interval=IDE_OBSERVER_INTERVAL))
-            console.print("[green]IntelliJ observer enabled[/green]")
+            console.print("[green]IntelliJ observer enabled (WS Extension Mode)[/green]")
+        except ImportError:
+            console.print("[yellow]Warning: 'websockets' package required for IntelliJ observer. Run: pip install websockets[/yellow]")
         except Exception as e:
             console.print(f"[yellow]Warning: Could not enable IntelliJ observer: {e}[/yellow]")
     if "browser" in enabled:
