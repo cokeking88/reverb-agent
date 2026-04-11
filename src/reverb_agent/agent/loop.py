@@ -48,7 +48,7 @@ class AgentLoop:
         )
         
         # 重要事件立即处理 - run async
-        if event.type in ["file_focus", "page_focus", "window_focus", "user_action"]:
+        if event.type in ["file_focus", "page_focus", "window_focus", "user_action", "user_reply"]:
             logger.info(f"Scheduling LLM analysis for: {event.type} (debounced)")
 
             # To avoid threading event loop complications completely,
@@ -147,18 +147,37 @@ class AgentLoop:
                     memory_type=memory_type,
                     tags=tags
                 )
+            else:
+                summary = analysis.get("summary", "")
             
             if analysis.get("should_ask_user") and self._callback:
                 question = analysis.get("question", "")
                 logger.info(f"LLM question: {question}")
-                self._callback(question)
+
+                # Provide a callback for when the user replies
+                def on_reply(user_answer: str):
+                    logger.info(f"User replied: {user_answer}")
+                    # Dispatch to loop as a system user_action
+                    with self._thread_lock:
+                        self._event_buffer.append(ObserverEvent(
+                            observer="system",
+                            type="user_reply",
+                            source={"app": "Reverb", "url": "N/A"},
+                            data={"question": question, "reply": user_answer}
+                        ))
+                    if self._main_loop and self._main_loop.is_running():
+                        asyncio.run_coroutine_threadsafe(self._process_events(), self._main_loop)
+
+                self._callback(thought=summary, question=question, reply_callback=on_reply)
+            elif self._callback:
+                self._callback(thought=summary, question=None, reply_callback=None)
         except Exception as e:
             logger.error(f"Error processing events: {e}")
     
     async def _analyze_events(self, events: List[ObserverEvent]) -> dict:
         """Use LLM to analyze events."""
         event_lines = []
-        for e in events[-10:]:
+        for e in events[-20:]:
             source_info = e.source.get('app', e.source.get('file', e.source.get('url', 'N/A')))
 
             # Extract rich DOM info if available
@@ -172,6 +191,10 @@ class AgentLoop:
                 if text: extra_info += f", Text: '{text}'"
                 if value: extra_info += f", Value: '{value}'"
                 extra_info += "]"
+            elif e.type == "user_reply":
+                q = e.data.get("question", "")
+                r = e.data.get("reply", "")
+                extra_info = f" [LLM Asked: '{q}', User Replied: '{r}']"
             elif e.type == "page_focus" and "content" in e.data:
                 content_preview = e.data["content"][:100].replace('\n', ' ')
                 extra_info = f" [Content preview: '{content_preview}...']"

@@ -258,10 +258,13 @@ while True:
             terminal_panel.add_status_message(f"LLM error: {error_msg}", is_error=True)
     
     # Callback for LLM questions
-    def on_thought(thought: str):
-        if thought and terminal_panel:
-            terminal_panel.add_thought(thought)
-    
+    def on_thought(thought: str, question: str = None, reply_callback: callable = None):
+        if terminal_panel:
+            if thought:
+                terminal_panel.add_thought(thought)
+            if question and reply_callback:
+                terminal_panel.set_question(question, reply_callback)
+
     if agent_loop:
         agent_loop.set_callback(on_thought)
     

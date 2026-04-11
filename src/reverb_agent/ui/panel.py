@@ -8,8 +8,10 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.console import Console
 from rich.live import Live
+from rich.prompt import Prompt
 
 from reverb_agent.observers.events import ObserverEvent
+from reverb_agent.logging import logger
 
 
 class TerminalPanel:
@@ -23,6 +25,10 @@ class TerminalPanel:
         self._console = Console()
         self._layout: Optional[Layout] = None
         self._running = False
+
+        # Interactive features
+        self._current_question: Optional[str] = None
+        self._on_user_reply_callback: Optional[callable] = None
     
     def add_event(self, event: ObserverEvent) -> None:
         self._events.append(event)
@@ -43,7 +49,19 @@ class TerminalPanel:
         self._memories.append(memory)
         if len(self._memories) > 15:
             self._memories.pop(0)
-    
+
+    def set_question(self, question: str, callback: callable) -> None:
+        """Set a question from LLM to ask the user."""
+        self._current_question = question
+        self._on_user_reply_callback = callback
+        self.update_status(f"Action needed: Press 'y' to reply to question.")
+
+    def clear_question(self) -> None:
+        """Clear the current question."""
+        self._current_question = None
+        self._on_user_reply_callback = None
+        self.update_status("Monitoring events...")
+
     def update_status(self, status: str) -> None:
         self._status = status
     
@@ -74,7 +92,12 @@ class TerminalPanel:
         text = Text()
         for thought in reversed(self._thoughts[-8:]):
             text.append(f"• {thought}\n\n", style="yellow")
-        
+
+        if self._current_question:
+            text.append("\n[bold cyan]💡 Question for you:[/]\n", style="cyan")
+            text.append(f"{self._current_question}\n", style="cyan")
+            text.append("[dim]Press 'r' to reply or 'i' to ignore[/dim]", style="dim")
+
         return Panel(
             text or Text("Waiting for analysis...", style="dim"),
             title="[bold]Thoughts[/]",
@@ -130,12 +153,16 @@ class TerminalPanel:
         """Run the terminal panel."""
         self._running = True
         self._layout = self._build_layout()
-        
+
+        # Input handling task
+        self._input_task = asyncio.create_task(self._keyboard_listener())
+
         # Track counts to detect changes
         last_event_count = 0
         last_thought_count = 0
         last_memory_count = 0
         last_status = ""
+        last_question = None
         
         self._console.clear()
         
@@ -152,9 +179,10 @@ class TerminalPanel:
                             last_event_count = len(self._events)
                             changed = True
                         
-                        if len(self._thoughts) != last_thought_count:
+                        if len(self._thoughts) != last_thought_count or self._current_question != last_question:
                             self._layout["thoughts"].update(self._render_thought_panel())
                             last_thought_count = len(self._thoughts)
+                            last_question = self._current_question
                             changed = True
                         
                         if len(self._memories) != last_memory_count:
@@ -177,6 +205,50 @@ class TerminalPanel:
         except Exception:
             pass
     
+    async def _keyboard_listener(self) -> None:
+        """Listen for keyboard input in the background to handle interactive questions."""
+        import sys
+        import select
+        import tty
+        import termios
+
+        # Store old settings
+        fd = sys.stdin.fileno()
+        try:
+            old_settings = termios.tcgetattr(fd)
+        except Exception:
+            return # Probably not a real TTY
+
+        try:
+            tty.setcbreak(fd)
+            while self._running:
+                if select.select([sys.stdin], [], [], 0.5)[0]:
+                    char = sys.stdin.read(1)
+                    if char == 'r' and self._current_question:
+                        # Restore terminal for normal prompt
+                        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+                        # Use a clean line under the UI to ask
+                        self._console.print(f"\n[cyan]{self._current_question}[/cyan]")
+                        reply = Prompt.ask("[yellow]Your reply (empty to cancel)[/yellow]")
+
+                        if reply and self._on_user_reply_callback:
+                            try:
+                                # Dispatch reply safely
+                                self._on_user_reply_callback(reply)
+                            except Exception as e:
+                                logger.error(f"Error invoking reply callback: {e}")
+
+                        self.clear_question()
+                        # Set back to cbreak for listening again
+                        tty.setcbreak(fd)
+                    elif char == 'i' and self._current_question:
+                        self.clear_question()
+
+                await asyncio.sleep(0.1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
     def stop(self) -> None:
         """Stop the panel."""
         self._running = False
