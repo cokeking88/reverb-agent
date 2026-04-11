@@ -21,7 +21,7 @@ from reverb_agent.observers.intellij import IntelliJObserver
 from reverb_agent.observers.browser import BrowserObserver
 from reverb_agent.observers.feishu import FeishuObserver
 from reverb_agent.observers.events import ObserverEvent
-from reverb_agent.ui import TerminalPanel
+from reverb_agent.ui import WebUIPanel
 
 console = Console()
 
@@ -83,20 +83,20 @@ def init():
 @click.option("--interval", default=5, help="Polling interval in seconds")
 @click.option("--observers", default="system,vscode,intellij,browser,feishu", help="Comma-separated list of observers to enable")
 @click.option("--browser", default="Google Chrome", help="Browser to monitor (Google Chrome, Safari, Microsoft Edge)")
-@click.option("--panel/--no-panel", default=True, help="Show terminal panel UI")
+@click.option("--panel/--no-panel", default=True, help="Show Web UI panel")
 def observe(interval, observers, browser, panel):
     """Start observation mode."""
     enabled = [o.strip() for o in observers.split(",")]
     console.print(f"[green]Starting observation (interval: {interval}s)...[/green]")
     console.print(f"[green]Enabled observers: {', '.join(enabled)}[/green]")
-    console.print(f"[green]Panel: {'enabled' if panel else 'disabled'}[/green]")
-    
+    console.print(f"[green]Web UI Panel: {'enabled' if panel else 'disabled'}[/green]")
+
     registry = ObserverRegistry()
-    
-    # Create terminal panel
-    terminal_panel = None
+
+    # Create web panel
+    web_panel = None
     if panel:
-        terminal_panel = TerminalPanel()
+        web_panel = WebUIPanel()
     
     # Register observers based on selection
     if "system" in enabled:
@@ -217,8 +217,8 @@ while True:
                                         source={"app": app, "window": ""},
                                         data={}
                                     )
-                                    if terminal_panel:
-                                        terminal_panel.add_event(event)
+                                    if web_panel:
+                                        web_panel.add_event(event)
                                     if agent_loop:
                                         agent_loop.on_event(event)
                 except:
@@ -249,29 +249,29 @@ while True:
             status_msg += f" ({config.llm.endpoint})"
         
         console.print(f"[green]LLM enabled: {status_msg}[/green]")
-        if terminal_panel:
-            terminal_panel.add_status_message(f"LLM: {status_msg}", is_error=False)
+        if web_panel:
+            web_panel.add_status_message(f"LLM: {status_msg}", is_error=False)
     except Exception as e:
         error_msg = str(e)[:60]
         console.print(f"[yellow]LLM error: {error_msg}[/yellow]")
-        if terminal_panel:
-            terminal_panel.add_status_message(f"LLM error: {error_msg}", is_error=True)
-    
+        if web_panel:
+            web_panel.add_status_message(f"LLM error: {error_msg}", is_error=True)
+
     # Callback for LLM questions
     def on_thought(thought: str, question: str = None, reply_callback: callable = None):
-        if terminal_panel:
+        if web_panel:
             if thought:
-                terminal_panel.add_thought(thought)
+                web_panel.add_thought(thought)
             if question and reply_callback:
-                terminal_panel.set_question(question, reply_callback)
+                web_panel.set_question(question, reply_callback)
 
     if agent_loop:
         agent_loop.set_callback(on_thought)
-    
+
     # Event handler - send to both panel and AgentLoop
     def on_event(event: ObserverEvent):
-        if terminal_panel:
-            terminal_panel.add_event(event)
+        if web_panel:
+            web_panel.add_event(event)
         if agent_loop:
             agent_loop.on_event(event)
 
@@ -289,33 +289,27 @@ while True:
         tail_thread = threading.Thread(target=tail_func, daemon=True, name="tail_and_emit")
         tail_thread.start()
 
-    # Start panel in background thread
-    panel_thread = None
-    if terminal_panel:
-        terminal_panel.update_status("Observers starting...")
-
-        def run_panel():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                loop.run_until_complete(terminal_panel.run())
-            finally:
-                loop.close()
-
-        panel_thread = threading.Thread(target=run_panel)
-        panel_thread.start()
-        time.sleep(0.5)
+    # Start Web UI in background thread
+    if web_panel:
+        web_panel.update_status("Observers starting...")
+        web_panel.run_in_thread()
+        console.print("[bold cyan]==================================================[/bold cyan]")
+        console.print("[bold cyan]🚀 Web UI Server started![/bold cyan]")
+        console.print("[bold cyan]👉 Open http://127.0.0.1:19998 in your browser[/bold cyan]")
+        console.print("[bold cyan]==================================================[/bold cyan]")
 
     # Run until interrupted
     try:
         if panel:
-            terminal_panel.update_status(f"Monitoring: {', '.join(enabled)}")
+            web_panel.update_status(f"Monitoring: {', '.join(enabled)}")
 
         async def main_runner():
             nonlocal main_loop
             main_loop = asyncio.get_running_loop()
             if agent_loop:
                 agent_loop.set_main_loop(main_loop)
+            if web_panel:
+                web_panel.set_main_loop(main_loop)
 
             await registry.start_all()
 
@@ -333,10 +327,8 @@ while True:
             asyncio.run(registry.stop_all())
         except Exception:
             pass
-        if terminal_panel:
-            terminal_panel.stop()
-            if panel_thread:
-                panel_thread.join(timeout=2)
+        if web_panel:
+            web_panel.stop()
 
 
 @main.command()

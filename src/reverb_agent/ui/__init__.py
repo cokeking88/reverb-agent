@@ -1,5 +1,5 @@
 """UI module for Reverb Agent."""
 
-from reverb_agent.ui.panel import TerminalPanel
+from reverb_agent.ui.web_panel import WebUIPanel
 
-__all__ = ["TerminalPanel"]
+__all__ = ["WebUIPanel"]
