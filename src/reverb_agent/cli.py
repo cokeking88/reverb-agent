@@ -115,8 +115,11 @@ def observe(interval, observers, browser, panel):
             console.print(f"[yellow]Warning: Could not enable IntelliJ observer: {e}[/yellow]")
     if "browser" in enabled:
         try:
+            import websockets
             registry.register(BrowserObserver(browser=browser, interval=3))
-            console.print(f"[green]Browser observer enabled ({browser})[/green]")
+            console.print(f"[green]Browser observer enabled (WS Extension Mode)[/green]")
+        except ImportError:
+            console.print("[yellow]Warning: 'websockets' package required for browser extension mode. Run: pip install websockets[/yellow]")
         except Exception as e:
             console.print(f"[yellow]Warning: Could not enable Browser observer: {e}[/yellow]")
     if "feishu" in enabled:

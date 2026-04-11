@@ -48,7 +48,7 @@ class AgentLoop:
         )
         
         # 重要事件立即处理 - run async
-        if event.type in ["file_focus", "page_focus", "window_focus"]:
+        if event.type in ["file_focus", "page_focus", "window_focus", "user_action"]:
             logger.info(f"Scheduling LLM analysis for: {event.type} (debounced)")
 
             # To avoid threading event loop complications completely,

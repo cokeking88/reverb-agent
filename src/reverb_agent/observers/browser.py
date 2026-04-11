@@ -1,30 +1,30 @@
-"""Browser observer for Chrome, Safari, Edge."""
+"""Browser observer via Chrome Extension WebSocket."""
 
 import asyncio
-import subprocess
+import json
+import logging
 from typing import List
 from reverb_agent.observers.base import Observer
 from reverb_agent.observers.events import ObserverEvent
 from reverb_agent.constants import Capability
+import websockets
+
+logger = logging.getLogger('reverb.browser')
 
 
 class BrowserObserver(Observer):
-    """Observer for browser events."""
-    
-    SUPPORTED_BROWSERS = {
-        "Google Chrome": "com.google.Chrome",
-        "Safari": "com.apple.Safari",
-        "Microsoft Edge": "com.microsoft.edgemac",
-    }
-    
+    """Observer for browser events via WebSocket Extension."""
+
     def __init__(self, browser: str = "Google Chrome", interval: int = 3):
-        bundle_id = self.SUPPORTED_BROWSERS.get(browser, "com.google.Chrome")
-        super().__init__("browser", app_bundle_id=bundle_id)
+        # We still claim it's the specified browser
+        super().__init__("browser", app_bundle_id=None)
         self._browser = browser
         self._interval = interval
-        self._task = None
-        self._last_url = None
-    
+        self._server = None
+        self._server_task = None
+        self._port = 19999
+        self._last_url = ""
+
     @property
     def capabilities(self) -> List[str]:
         return [
@@ -32,58 +32,75 @@ class BrowserObserver(Observer):
             Capability.DOM_CONTENT,
             Capability.USER_ACTION,
         ]
-    
+
     async def start(self) -> None:
         await super().start()
-        self._task = asyncio.create_task(self._poll_loop())
-    
-    async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
-        await super().stop()
-    
-    async def _poll_loop(self) -> None:
-        while self._running:
-            try:
-                await self._check_browser()
-            except Exception as e:
-                print(f"Error checking browser: {e}")
-            await asyncio.sleep(self._interval)
-    
-    async def _check_browser(self) -> None:
-        script = f'''
-        tell application "{self._browser}"
-            if (count of windows) > 0 then
-                set w to front window
-                if (count of tabs of w) > 0 then
-                    set t to active tab of w
-                    return URL of t & "|||" & title of t
-                end if
-            end if
-        end tell
-        return ""
-        '''
-        result = subprocess.run(
-            ["osascript", "-e", script],
-            capture_output=True,
-            text=True
+
+        # Start a websocket server on 127.0.0.1:19999 to listen to the extension
+        logger.info(f"Starting Browser Extension WS Server on port {self._port}")
+        self._server = await websockets.serve(
+            self._handle_client, "127.0.0.1", self._port
         )
-        if result.returncode == 0 and result.stdout.strip():
-            output = result.stdout.strip()
-            if output and output != "|||" and output != self._last_url:
-                self._last_url = output
-                parts = output.split("|||")
-                url = parts[0] if len(parts) > 0 else ""
-                title = parts[1] if len(parts) > 1 else ""
-                
-                event = ObserverEvent(
-                    observer=self.name,
-                    type="page_focus",
-                    source={"app": self._browser, "url": url},
-                    data={"title": title, "url": url}
-                )
-                self._emit(event)
+
+    async def stop(self) -> None:
+        if self._server:
+            self._server.close()
+            await self._server.wait_closed()
+        await super().stop()
+
+    async def _handle_client(self, websocket):
+        """Handle incoming connection from the Chrome extension."""
+        try:
+            async for message in websocket:
+                if not self._running:
+                    break
+                try:
+                    payload = json.loads(message)
+                    event_type = payload.get("type")
+                    data = payload.get("data", {})
+
+                    if event_type == "page_load":
+                        url = data.get("url", "")
+                        title = data.get("title", "")
+                        content = data.get("content", "")
+                        if url != self._last_url:
+                            self._last_url = url
+                            event = ObserverEvent(
+                                observer=self.name,
+                                type="page_focus",
+                                source={"app": self._browser, "url": url},
+                                data={"title": title, "url": url, "content": content}
+                            )
+                            self._emit(event)
+
+                    elif event_type == "user_click":
+                        tag = data.get("tag", "")
+                        text = data.get("text", "")
+                        url = data.get("url", "")
+                        event = ObserverEvent(
+                            observer=self.name,
+                            type="user_action",
+                            source={"app": self._browser, "url": url},
+                            data={"action": "click", "element": tag, "text": text}
+                        )
+                        self._emit(event)
+
+                    elif event_type == "user_input":
+                        tag = data.get("tag", "")
+                        name = data.get("name", "")
+                        value = data.get("value_preview", "")
+                        url = data.get("url", "")
+                        event = ObserverEvent(
+                            observer=self.name,
+                            type="user_action",
+                            source={"app": self._browser, "url": url},
+                            data={"action": "input", "element": tag, "name": name, "value": value}
+                        )
+                        self._emit(event)
+
+                except json.JSONDecodeError:
+                    pass
+                except Exception as e:
+                    logger.error(f"Error parsing browser event: {e}")
+        except websockets.exceptions.ConnectionClosed:
+            pass
