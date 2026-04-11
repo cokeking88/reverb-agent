@@ -1,117 +1,62 @@
-"""System observer for macOS window focus events using daemon poller."""
+"""System observer for macOS window focus events using pyobjc."""
 
 import asyncio
-import subprocess
-import os
 from typing import List
+import AppKit
+from PyObjCTools import AppHelper
+
 from reverb_agent.observers.base import Observer
 from reverb_agent.observers.events import ObserverEvent
 from reverb_agent.constants import Capability
 
 
-DAEMON_LOG = "/tmp/reverb_daemon.log"
-DAEMON_SCRIPT = "/tmp/reverb_daemon.py"
-
-
 class SystemObserver(Observer):
-    """Observer for system-level events on macOS using background daemon."""
-    
+    """Observer for system-level events on macOS using AppKit."""
+
     def __init__(self, interval: int = 2):
         super().__init__("system", app_bundle_id=None)
         self._interval = interval
-        self._task = None
         self._last_app = None
-        self._daemon_pid = None
-    
+        self._poll_task = None
+
     @property
     def capabilities(self) -> List[str]:
         return [
             Capability.WINDOW_FOCUS,
             Capability.FILE_CONTENT,
         ]
-    
+
     async def start(self) -> None:
         await super().start()
-        await self._start_daemon()
-        self._task = asyncio.create_task(self._read_loop())
-    
+        # macOS GUI events generally require a runloop to use notifications.
+        # A simple robust way from a background async process is polling NSWorkspace active application.
+        self._poll_task = asyncio.create_task(self._poll_active_app())
+
     async def stop(self) -> None:
-        if self._task:
-            self._task.cancel()
+        if self._poll_task:
+            self._poll_task.cancel()
             try:
-                await self._task
+                await self._poll_task
             except asyncio.CancelledError:
                 pass
-        if self._daemon_pid:
-            try:
-                subprocess.run(["kill", str(self._daemon_pid)], timeout=1)
-            except:
-                pass
         await super().stop()
-    
-    async def _start_daemon(self) -> None:
-        daemon_script = f"""#!/usr/bin/env python3
-import subprocess
-import os
-import time
-import sys
 
-LOG = "{DAEMON_LOG}"
-last = ''
-
-while True:
-    try:
-        result = subprocess.run(
-            ["osascript", "/tmp/test_front.app"],
-            capture_output=True, text=True, timeout=2
-        )
-        app = result.stdout.strip()
-        if app and app != last:
-            with open(LOG, 'a') as f:
-                f.write(time.strftime("%H:%M:%S") + ': ' + app + '\\n')
-            last = app
-    except:
-        pass
-    time.sleep(1)
-"""
-        
-        with open(DAEMON_SCRIPT, 'w') as f:
-            f.write(daemon_script)
-        os.chmod(DAEMON_SCRIPT, 0o755)
-        
-        proc = subprocess.Popen(
-            ["/usr/bin/python3", DAEMON_SCRIPT],
-            cwd="/tmp",
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True
-        )
-        self._daemon_pid = proc.pid
-    
-    async def _read_loop(self) -> None:
-        last_pos = 0
+    async def _poll_active_app(self) -> None:
+        """Poll the active application periodically."""
+        workspace = AppKit.NSWorkspace.sharedWorkspace()
         while self._running:
             try:
-                if os.path.exists(DAEMON_LOG):
-                    stat = os.stat(DAEMON_LOG)
-                    if stat.st_size > last_pos:
-                        with open(DAEMON_LOG, 'r') as f:
-                            f.seek(last_pos)
-                            new_lines = f.readlines()
-                        last_pos = stat.st_size
-                        
-                        for line in new_lines:
-                            line = line.strip()
-                            if ':' in line:
-                                app = line.split(':', 1)[1].strip()
-                                if app and app != self._last_app:
-                                    self._last_app = app
-                                    self._emit_event(app, "")
-            except:
+                active_app = workspace.frontmostApplication()
+                if active_app:
+                    app_name = active_app.localizedName()
+                    if app_name and app_name != self._last_app:
+                        self._last_app = app_name
+                        self._emit_event(app_name, "")
+            except Exception as e:
                 pass
-            await asyncio.sleep(0.5)
-    
+
+            await asyncio.sleep(self._interval)
+
     def _emit_event(self, app_name: str, window_title: str) -> None:
         event = ObserverEvent(
             observer=self.name,
