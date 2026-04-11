@@ -82,3 +82,12 @@ Hermes 的核心亮点是 **Procedural Memory (程序性记忆)**。它把总结
 6. 未来当用户发出类似指令时，即可直接调用 `execute_skill`。
 
 这正是 Autonomous AI Agents 闭环学习的最简优雅实现模式。
+
+## 5. 第四阶段：多级记忆系统 (Multi-Level Cognitive Memory)
+我们在 `AgentLoop` 中划分了四级认知层级：
+1. **User Profile (用户画像)**：用户偏好的工作流与习惯。
+2. **Semantic (语义规则)**：系统规则、项目结构上下文。
+3. **Episodic (情景记忆)**：通过 FTS5 召回的跨会话相似历史事件。
+4. **Procedural (程序记忆)**：已经固化提炼的可用技能列表。
+
+这使得大模型能更立体地理解用户的当前操作，实现类似于 Hermes 的 Honcho (多模态分层记忆) 功能。
