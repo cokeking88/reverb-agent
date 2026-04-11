@@ -1,0 +1,33 @@
+<idea-plugin>
+    <id>com.reverb.agent.idea</id>
+    <name>Reverb Agent</name>
+    <vendor email="noreply@reverb.com" url="https://github.com/reverb">Reverb</vendor>
+
+    <description><![CDATA[
+    Monitor IDE events and broadcast them via WebSocket to the Reverb Agent local backend.
+    Tracks file switches, editor focus, copy/paste, document changes, and file saves.
+    ]]></description>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.java</depends>
+    <depends>com.intellij.modules.xdebugger</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <postStartupActivity implementation="com.reverb.plugin.ReverbStartupActivity"/>
+    </extensions>
+
+    <applicationListeners>
+        <listener class="com.reverb.plugin.ReverbFileEditorListener"
+                  topic="com.intellij.openapi.fileEditor.FileEditorManagerListener"/>
+        <listener class="com.reverb.plugin.ReverbDocumentListener"
+                  topic="com.intellij.openapi.editor.event.DocumentListener"/>
+        <listener class="com.reverb.plugin.ReverbExecutionListener"
+                  topic="com.intellij.execution.ExecutionListener"/>
+    </applicationListeners>
+
+    <projectListeners>
+        <listener class="com.reverb.plugin.ReverbBreakpointListener"
+                  topic="com.intellij.xdebugger.breakpoints.XBreakpointListener"/>
+    </projectListeners>
+
+</idea-plugin>
