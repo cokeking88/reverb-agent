@@ -59,7 +59,9 @@ High-level architecture (big picture)
   - Important behavior: AgentLoop schedules LLM work in a ThreadPoolExecutor and calls asyncio.run from a worker thread (src/reverb_agent/agent/loop.py:42-44). The LLM client methods are async and expected to be awaited inside the loop.
 
 - Memory, Skills, and Storage
-  - MemoryStore and SkillManager manage persistence to reverb.db and skills/ under the data dir. These are used by the CLI and AgentLoop (references found in src/reverb_agent/agent/* and CLI usage at src/reverb_agent/cli.py:231-241 and 320-351).
+  - MemoryStore uses SQLite and employs FTS5 full-text search (`event_log_fts` and `memories_fts`) to enable fast querying and long-term cross-session recall.
+  - SkillManager manages JSON-based procedural skills under `skills/`. `AgentLoop` automatically captures `new_skill` events to build autonomous workflows.
+  - The Agent uses a Multi-Level Cognitive Architecture (User Profile, Semantic, Episodic, Procedural) mapping these memories to the LLM system prompt.
 
 - UI: TerminalPanel (src/reverb_agent/ui/panel.py)
   - If enabled, the CLI creates a TerminalPanel and runs it in a background thread/event loop to display events, LLM "thoughts", and status messages (see src/reverb_agent/cli.py:96-101 and panel thread at 280-295).
