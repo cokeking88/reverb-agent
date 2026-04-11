@@ -256,9 +256,31 @@ class AgentLoop:
         event_summary = "\n".join(event_lines)
         logger.info(f"Sending to LLM: {event_summary[:100]}...")
 
-        # Get recent memories to build context
-        recent_memories = self.memory.get_memories(limit=10)
-        memory_lines = [f"- [{m.memory_type}] {m.content}" for m in recent_memories]
+        # Get recent memories to build context (Semantic and User Profile)
+        semantic_memories = self.memory.get_memories(memory_type="semantic", limit=5)
+        user_memories = self.memory.get_memories(memory_type="user_profile", limit=5)
+        episodic_memories = self.memory.get_memories(memory_type="episodic", limit=5)
+
+        memory_lines = []
+        if user_memories:
+            memory_lines.append("\n【关于用户的习惯与偏好 (User Profile)】")
+            for m in user_memories: memory_lines.append(f"- {m.content}")
+        if semantic_memories:
+            memory_lines.append("\n【系统与环境知识 (Semantic Knowledge)】")
+            for m in semantic_memories: memory_lines.append(f"- {m.content}")
+        if episodic_memories:
+            memory_lines.append("\n【最近发生的事件总结 (Recent Episodic Memory)】")
+            for m in episodic_memories: memory_lines.append(f"- {m.content}")
+
+        # Load procedural skills summary
+        procedural_context = ""
+        if self.skill_manager:
+            skills = self.skill_manager.list_skills()
+            if skills:
+                procedural_context = "【已掌握的自动技能 (Procedural Skills)】\n"
+                for s in skills[:10]:
+                    procedural_context += f"- {s.name}: {s.description}\n"
+                procedural_context += "\n"
 
         # Use FTS5 to search for relevant historical events matching the current context
         # This gives the agent "long-term cross-session recall" based on the last few events
@@ -291,13 +313,16 @@ class AgentLoop:
                     except Exception as ex:
                         logger.warning(f"FTS search failed: {ex}")
 
-        memory_context = "没有任何历史记忆。" if not memory_lines else "最近记忆：\n" + "\n".join(memory_lines)
+        memory_context = "没有任何历史记忆。" if not memory_lines else "\n".join(memory_lines)
         if fts_context:
             memory_context = fts_context + memory_context
 
+        if procedural_context:
+            memory_context += "\n" + procedural_context
+
         system_prompt = f"""你是一个智能工作助手，负责分析用户当前的屏幕和操作上下文事件。
 
-【用户的历史记忆】（这是用户之前完成的工作，帮助你理解他当前行为的连贯性）：
+【多级记忆与跨会话知识 (Multi-Level Memory & Knowledge)】：
 {memory_context}
 
 【自动技能生成】（Autonomous Skill Creation）：
@@ -312,7 +337,7 @@ class AgentLoop:
 {{
   "should_remember": true/false,
   "summary": "简单总结当前用户正在做的事情，包含上下文背景和目的（不超过50字）",
-  "type": "episodic/semantic",
+  "type": "episodic/semantic/user_profile",
   "tags": ["tag1", "tag2"],
   "should_ask_user": true/false,
   "question": "如果你看到用户的行为有特殊的意图但不确定，可以生成一个简短问题询问用户（比如：'你正在查阅并发相关的资料，是遇到了多线程bug吗？'），如果非常明确则留空",
