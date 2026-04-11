@@ -3,7 +3,8 @@
 import json
 import time
 import uuid
-from typing import Optional
+import threading
+from typing import Optional, List
 
 from sqlalchemy import Column, String, Float, Text, create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -49,9 +50,13 @@ class MemoryStore:
     """Memory storage manager."""
 
     def __init__(self, db_path: str):
-        self.engine = create_engine(f"sqlite:///{db_path}")
+        self.engine = create_engine(f"sqlite:///{db_path}", connect_args={"check_same_thread": False})
         Base.metadata.create_all(self.engine)
         self.Session = sessionmaker(bind=self.engine)
+
+        self._event_buffer: List[EventLog] = []
+        self._buffer_lock = threading.Lock()
+        self._flush_threshold = 20
 
     def add_memory(
         self, content: str, memory_type: str = "episodic", tags: list = None
@@ -89,7 +94,7 @@ class MemoryStore:
         source: dict,
         data: dict,
     ) -> None:
-        """Log an event."""
+        """Log an event to buffer and flush if necessary."""
         event = EventLog(
             id=str(uuid.uuid4()),
             session_id=session_id,
@@ -99,9 +104,32 @@ class MemoryStore:
             source=json.dumps(source),
             data=json.dumps(data),
         )
+
+        should_flush = False
+        with self._buffer_lock:
+            self._event_buffer.append(event)
+            if len(self._event_buffer) >= self._flush_threshold:
+                should_flush = True
+
+        if should_flush:
+            self.flush_events()
+
+    def flush_events(self) -> None:
+        """Flush the event buffer to the database."""
+        with self._buffer_lock:
+            if not self._event_buffer:
+                return
+            events_to_flush = self._event_buffer.copy()
+            self._event_buffer.clear()
+
         with self.Session() as session:
-            session.add(event)
-            session.commit()
+            try:
+                session.add_all(events_to_flush)
+                session.commit()
+            except Exception:
+                session.rollback()
+                # On error, we could re-add to buffer, but for now we just drop them to avoid poison pills
+                pass
 
     def create_session(self) -> str:
         """Create a new session."""
@@ -111,3 +139,8 @@ class MemoryStore:
             s.add(session)
             s.commit()
         return session_id
+
+    def close(self) -> None:
+        """Cleanup resources and flush remaining buffer."""
+        self.flush_events()
+        self.engine.dispose()
