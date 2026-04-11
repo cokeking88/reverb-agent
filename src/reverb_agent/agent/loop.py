@@ -4,6 +4,7 @@ import asyncio
 import json
 import concurrent.futures
 import uuid
+import threading
 from typing import List, Optional, Callable
 from reverb_agent.observers.events import ObserverEvent
 from reverb_agent.agent.llm import LLMClient
@@ -24,7 +25,6 @@ class AgentLoop:
         self._debounce_task: Optional[asyncio.Task] = None
         self._debounce_delay = 2.0
         self._main_loop = None
-        import threading
         self._thread_lock = threading.Lock()
         logger.info("AgentLoop initialized")
 
