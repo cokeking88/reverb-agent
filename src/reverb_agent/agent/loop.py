@@ -355,7 +355,13 @@ class AgentLoop:
 注：should_remember请谨慎设置为true。只有当用户的操作构成一个完整的“经验、知识、习惯或者特定的工作流上下文”时，才需要记录。单纯的无意义网页浏览不要记录。"""
         
         messages = [{"role": "user", "content": f"事件:\n{event_summary}"}]
-        
+
+        logger.info("\n========== 发送给大模型的 System Prompt ==========\n")
+        logger.info(system_prompt)
+        logger.info("\n========== 发送给大模型的 User Event (前1000字) ==========\n")
+        logger.info(messages[0]["content"][:1000] + "..." if len(messages[0]["content"]) > 1000 else messages[0]["content"])
+        logger.info("\n=================================================\n")
+
         try:
             full_content = ""
             async for chunk in self.llm.chat_stream(messages, system_prompt):
