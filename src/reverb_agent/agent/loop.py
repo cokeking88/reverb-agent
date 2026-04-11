@@ -157,23 +157,59 @@ class AgentLoop:
     
     async def _analyze_events(self, events: List[ObserverEvent]) -> dict:
         """Use LLM to analyze events."""
-        event_summary = "\n".join([
-            f"- {e.observer}: {e.type} - {e.source.get('app', e.source.get('file', e.source.get('url', 'N/A')))}"
-            for e in events[-10:]
-        ])
+        event_lines = []
+        for e in events[-10:]:
+            source_info = e.source.get('app', e.source.get('file', e.source.get('url', 'N/A')))
+
+            # Extract rich DOM info if available
+            extra_info = ""
+            if e.type == "user_action":
+                action = e.data.get("action", "")
+                element = e.data.get("element", "")
+                text = e.data.get("text", "")
+                value = e.data.get("value", "")
+                extra_info = f" [Action: {action}, Element: {element}"
+                if text: extra_info += f", Text: '{text}'"
+                if value: extra_info += f", Value: '{value}'"
+                extra_info += "]"
+            elif e.type == "page_focus" and "content" in e.data:
+                content_preview = e.data["content"][:100].replace('\n', ' ')
+                extra_info = f" [Content preview: '{content_preview}...']"
+
+            event_lines.append(f"- {e.observer}: {e.type} - {source_info}{extra_info}")
+
+        event_summary = "\n".join(event_lines)
         logger.info(f"Sending to LLM: {event_summary[:100]}...")
         
-        system_prompt = """你是一个工作助手。分析用户事件。
+        system_prompt = """你是一个工作助手，负责分析用户当前的屏幕和操作上下文事件。
 
-直接返回以下格式的JSON，不要其他内容：
-{"should_remember": false, "summary": "简单总结", "type": "episodic", "tags": [], "should_ask_user": false, "question": ""}"""
+通过一系列事件（包括窗口切换、网页焦点切换、网页内元素的点击、输入等操作），来理解用户正在做什么、在看什么内容。
+
+请直接返回以下格式的纯JSON文本，不要包裹在Markdown的```json ```里：
+{
+  "should_remember": true/false,
+  "summary": "简单总结当前用户正在做的事情（不超过30字）",
+  "type": "episodic/semantic",
+  "tags": ["tag1", "tag2"],
+  "should_ask_user": true/false,
+  "question": "如果有些意图非常不明确需要用户解答，则生成一个简短问题，否则留空"
+}"""
         
         messages = [{"role": "user", "content": f"事件:\n{event_summary}"}]
         
         try:
             response = await self.llm.chat(messages, system_prompt)
             logger.info(f"LLM Response: {response.content[:200]}...")
-            return json.loads(response.content)
+
+            content = response.content.strip()
+            # Handle markdown code blocks if the LLM ignores instructions
+            if content.startswith("```json"):
+                content = content[7:]
+                if content.endswith("```"):
+                    content = content[:-3]
+            content = content.strip()
+
+            return json.loads(content)
         except json.JSONDecodeError as e:
             logger.error(f"LLM JSON decode error: {e}")
             return {
