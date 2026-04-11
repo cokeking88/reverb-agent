@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Reverb Agent Observer",
+  "version": "1.0.0",
+  "description": "Observes browser activity for Reverb Agent to learn your workflows.",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
