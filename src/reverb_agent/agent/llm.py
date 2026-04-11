@@ -24,6 +24,7 @@ class LLMClient:
 
         self._aiohttp_session = None
         self._openai_client = None
+        self._anthropic_client = None
 
         if provider in ("openai", "openrouter"):
             try:
@@ -36,6 +37,15 @@ class LLMClient:
                 )
             except ImportError:
                 raise ImportError("openai package not installed")
+        elif provider == "anthropic":
+            try:
+                from anthropic import AsyncAnthropic
+                self._anthropic_client = AsyncAnthropic(
+                    api_key=self.api_key or "dummy",
+                    base_url=self.endpoint or None
+                )
+            except ImportError:
+                raise ImportError("anthropic package not installed")
 
     async def _get_aiohttp_session(self):
         if self._aiohttp_session is None or self._aiohttp_session.closed:
@@ -49,6 +59,8 @@ class LLMClient:
             return await self._ollama_chat(messages, system)
         elif self.provider in ("openai", "openrouter"):
             return await self._openai_chat(messages, system)
+        elif self.provider == "anthropic":
+            return await self._anthropic_chat(messages, system)
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
 
@@ -90,9 +102,31 @@ class LLMClient:
             usage=response.usage.model_dump() if response.usage else None
         )
 
+    async def _anthropic_chat(self, messages: list[dict], system: Optional[str]) -> LLMResponse:
+        kwargs = {
+            "model": self.model,
+            "max_tokens": 1024,
+            "messages": messages,
+        }
+        if system:
+            kwargs["system"] = system
+
+        response = await self._anthropic_client.messages.create(**kwargs)
+        return LLMResponse(
+            content=response.content[0].text,
+            model=response.model,
+            usage={
+                "prompt_tokens": response.usage.input_tokens,
+                "completion_tokens": response.usage.output_tokens,
+                "total_tokens": response.usage.input_tokens + response.usage.output_tokens
+            }
+        )
+
     async def close(self):
         """Clean up underlying HTTP connections."""
         if self._aiohttp_session and not self._aiohttp_session.closed:
             await self._aiohttp_session.close()
         if self._openai_client:
             await self._openai_client.close()
+        if self._anthropic_client:
+            await self._anthropic_client.close()
