@@ -1,0 +1,15 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!build.gradle.kts
+!settings.gradle.kts
+
+# IntelliJ IDEA
+.idea/
+*.iml
+*.iws
+out/
+
+# Sandbox
+idea-sandbox/
