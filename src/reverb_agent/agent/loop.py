@@ -9,15 +9,17 @@ from typing import List, Optional, Callable
 from reverb_agent.observers.events import ObserverEvent
 from reverb_agent.agent.llm import LLMClient
 from reverb_agent.agent.memory import MemoryStore
+from reverb_agent.agent.skills import SkillManager
 from reverb_agent.logging import logger
 
 
 class AgentLoop:
     """Agent loop for processing observer events and learning."""
-    
-    def __init__(self, llm_client: LLMClient, memory_store: MemoryStore):
+
+    def __init__(self, llm_client: LLMClient, memory_store: MemoryStore, skill_manager: SkillManager = None):
         self.llm = llm_client
         self.memory = memory_store
+        self.skill_manager = skill_manager
         self._event_buffer: List[ObserverEvent] = []
         self._callback: Optional[Callable] = None
         self._stream_callback: Optional[Callable] = None
@@ -163,7 +165,21 @@ class AgentLoop:
                     )
             else:
                 summary = analysis.get("summary", "")
-            
+
+            # Autonomous Skill Creation
+            if self.skill_manager and analysis.get("new_skill"):
+                skill_data = analysis.get("new_skill")
+                if isinstance(skill_data, dict) and "name" in skill_data and "steps" in skill_data:
+                    logger.info(f"Creating autonomous skill: {skill_data['name']}")
+                    self.skill_manager.create_skill(
+                        name=skill_data.get("name", "Auto Skill"),
+                        description=skill_data.get("description", "Autonomous generated skill"),
+                        trigger=skill_data.get("trigger", ""),
+                        steps=skill_data.get("steps", [])
+                    )
+                    # Tell user about it via summary
+                    summary += f"\n✨ 新增了自动技能：{skill_data['name']}"
+
             if analysis.get("should_ask_user") and self._callback:
                 question = analysis.get("question", "")
                 if question:
@@ -198,7 +214,7 @@ class AgentLoop:
     async def _analyze_events_stream(self, events: List[ObserverEvent]) -> dict:
         """Use LLM to analyze events with streaming."""
         event_lines = []
-        for e in events[-50:]:
+        for e in events[-80:]: # Increased from 50 to 80 events to capture longer workflows
             source_info = e.source.get('app', e.source.get('file', e.source.get('url', 'N/A')))
 
             # Extract rich DOM info if available
@@ -216,28 +232,100 @@ class AgentLoop:
                 q = e.data.get("question", "")
                 r = e.data.get("reply", "")
                 extra_info = f" [LLM Asked: '{q}', User Replied: '{r}']"
-            elif e.type == "page_focus" and "content" in e.data:
-                content_preview = e.data["content"][:300].replace('\n', ' ')
-                extra_info = f" [Content preview: '{content_preview}...']"
+            elif e.type == "page_focus":
+                title = e.data.get("title", "")
+                content_preview = ""
+                if "content" in e.data and e.data["content"]:
+                    content_preview = e.data["content"][:4000].replace('\n', ' ').strip()
+
+                extra_info = f" [Title: '{title}'"
+                if content_preview:
+                    # Cap historical events context to prevent prompt injection and token explosion
+                    extra_info += f", Page content snippet: '{content_preview[:800]}...']"
+                else:
+                    extra_info += "]"
 
             event_lines.append(f"- {e.observer}: {e.type} - {source_info}{extra_info}")
 
+        # Add full context for the *current* focused page only
+        last_event = events[-1] if events else None
+        if last_event and last_event.type == "page_focus" and "content" in last_event.data and last_event.data["content"]:
+            full_content = last_event.data["content"][:4000].replace('\n', ' ').strip()
+            event_lines.append(f"\n--- CURRENT FOCUSED PAGE CONTENT ---\n{full_content}\n----------------------------------")
+
         event_summary = "\n".join(event_lines)
         logger.info(f"Sending to LLM: {event_summary[:100]}...")
-        
-        system_prompt = """你是一个智能工作助手，负责分析用户当前的屏幕和操作上下文事件。
 
-通过传入的这批事件（包括过去一段时间的窗口切换、网页焦点切换、网页内元素的点击、输入操作等），来理解用户正在经历的工作流或学习路径。
+        # Get recent memories to build context
+        recent_memories = self.memory.get_memories(limit=10)
+        memory_lines = [f"- [{m.memory_type}] {m.content}" for m in recent_memories]
 
-请先进行思考，如果支持 <think> 标签，请使用 <think> 标签输出思考过程。然后直接返回以下格式的纯JSON文本，不要包裹在Markdown的```json ```里：
-{
+        # Use FTS5 to search for relevant historical events matching the current context
+        # This gives the agent "long-term cross-session recall" based on the last few events
+        fts_context = ""
+        if len(events) >= 2:
+            search_terms = []
+            for e in events[-5:]:
+                if e.type == "page_focus" and "title" in e.data:
+                    search_terms.append(e.data["title"][:20])
+                elif e.type == "user_action" and "element" in e.data:
+                    search_terms.append(str(e.data["element"])[:20])
+
+            if search_terms:
+                # Clean up search terms for FTS MATCH syntax (alphanumeric only, OR joined)
+                import re
+                clean_terms = [re.sub(r'[^a-zA-Z0-9\s]', ' ', term).strip() for term in search_terms if term]
+                valid_terms = [t for t in clean_terms if len(t) > 2]
+
+                if valid_terms:
+                    # Search historical events
+                    query = " OR ".join(valid_terms)
+                    try:
+                        past_events = self.memory.search_events_fts(query, limit=5)
+                        if past_events:
+                            fts_lines = []
+                            for p in past_events:
+                                source = str(p['source'])[:30]
+                                fts_lines.append(f"- {p['observer']}:{p['event_type']} @ {source} (Rank {abs(p['rank']):.2f})")
+                            fts_context = "【跨会话历史相似事件】\n" + "\n".join(fts_lines) + "\n\n"
+                    except Exception as ex:
+                        logger.warning(f"FTS search failed: {ex}")
+
+        memory_context = "没有任何历史记忆。" if not memory_lines else "最近记忆：\n" + "\n".join(memory_lines)
+        if fts_context:
+            memory_context = fts_context + memory_context
+
+        system_prompt = f"""你是一个智能工作助手，负责分析用户当前的屏幕和操作上下文事件。
+
+【用户的历史记忆】（这是用户之前完成的工作，帮助你理解他当前行为的连贯性）：
+{memory_context}
+
+【自动技能生成】（Autonomous Skill Creation）：
+如果你观察到用户完成了一系列重复性或具有明确目标的操作（如通过UI点击、输入、网络请求完成了一个多步任务），你应该将其总结为一个可复用的技能。技能是针对特定目标的过程性知识。
+
+传入的事件序列包含：
+- 窗口与网页焦点的切换（Page content snippet 提供了网页的实质正文内容）
+- 网页内按钮点击与 API 网络请求 (network_api)
+- IDE 代码编辑与运行断点 (ide_debug/run)
+
+请结合【历史记忆】和最新的事件流进行思考，如果支持 <think> 标签，请使用 <think> 标签输出思考过程。然后直接返回以下格式的纯JSON文本，不要包裹在Markdown的```json ```里：
+{{
   "should_remember": true/false,
   "summary": "简单总结当前用户正在做的事情，包含上下文背景和目的（不超过50字）",
   "type": "episodic/semantic",
   "tags": ["tag1", "tag2"],
   "should_ask_user": true/false,
-  "question": "如果你看到用户的行为有特殊的意图但不确定，可以生成一个简短问题询问用户（比如：'你正在查阅并发相关的资料，是遇到了多线程bug吗？'），如果非常明确则留空"
-}
+  "question": "如果你看到用户的行为有特殊的意图但不确定，可以生成一个简短问题询问用户（比如：'你正在查阅并发相关的资料，是遇到了多线程bug吗？'），如果非常明确则留空",
+  "new_skill": {{
+    "name": "技能名称（如：发送工作周报）",
+    "description": "详细描述该技能的作用",
+    "trigger": "触发条件或用户可能说的指令",
+    "steps": [
+      {{"action": "click", "params": {{"element": "button_id"}}}},
+      {{"action": "api_post", "params": {{"url": "/api/v1/submit", "body": "JSON payload"}}}}
+    ]
+  }} // 如果不需要生成新技能，则省略 new_skill 字段
+}}
 
 注：should_remember请谨慎设置为true。只有当用户的操作构成一个完整的“经验、知识、习惯或者特定的工作流上下文”时，才需要记录。单纯的无意义网页浏览不要记录。"""
         

@@ -244,8 +244,11 @@ while True:
             endpoint=config.llm.endpoint,
             api_key=config.llm.api_key
         )
-        agent_loop = AgentLoop(llm_client, memory_store)
-        
+
+        skills_dir = config.data_dir / "skills"
+        skill_manager = SkillManager(skills_dir)
+        agent_loop = AgentLoop(llm_client, memory_store, skill_manager)
+
         # Build status message
         status_msg = f"{config.llm.provider}/{config.llm.model}"
         if config.llm.endpoint:
@@ -393,6 +396,34 @@ async def run(skill_id):
     
     result = await manager.execute_skill(skill_id)
     console.print(f"[green]{result}[/green]")
+
+
+@main.command()
+@click.argument("query")
+@click.option("--limit", default=10, help="Number of results to show")
+def search(query, limit):
+    """Search your memories and events."""
+    config = load_config()
+    db_path = config.data_dir / "reverb.db"
+    store = MemoryStore(str(db_path))
+
+    memories = store.search_memories_fts(query, limit=limit)
+    if memories:
+        console.print("\n[bold cyan]=== Memories ===[/bold cyan]")
+        for m in memories:
+            console.print(f"• [green]{m['memory_type']}[/green]: {m['content']} [dim](score: {abs(m['rank']):.2f})[/dim]")
+
+    events = store.search_events_fts(query, limit=limit)
+    if events:
+        console.print("\n[bold cyan]=== Events ===[/bold cyan]")
+        for e in events:
+            source = str(e['source'])[:30] + "..." if len(str(e['source'])) > 30 else e['source']
+            data = str(e['data'])[:60] + "..." if len(str(e['data'])) > 60 else e['data']
+            console.print(f"• [green]{e['observer']}:{e['event_type']}[/green] @ {source}")
+            console.print(f"  [dim]{data} (score: {abs(e['rank']):.2f})[/dim]")
+
+    if not memories and not events:
+        console.print(f"[yellow]No FTS matches found for: '{query}'[/yellow]")
 
 
 if __name__ == "__main__":
