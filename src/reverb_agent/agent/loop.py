@@ -30,7 +30,8 @@ class AgentLoop:
 
     def on_event(self, event: ObserverEvent) -> None:
         """Receive events from observers."""
-        self._event_buffer.append(event)
+        with self._thread_lock:
+            self._event_buffer.append(event)
         logger.info(f"Event received: {event.type} - {event.source}")
         
         # 记录到数据库
@@ -46,53 +47,59 @@ class AgentLoop:
         if event.type in ["file_focus", "page_focus", "window_focus"]:
             logger.info(f"Scheduling LLM analysis for: {event.type} (debounced)")
 
+            # Cancel the previous run if possible (it's in a thread so we use an event flag)
             with self._thread_lock:
-                # Cancel the previous run if possible (it's in a thread so we use an event flag)
                 if hasattr(self, '_debounce_cancel_event'):
                     self._debounce_cancel_event.set()
 
                 self._debounce_cancel_event = threading.Event()
+                cancel_evt = self._debounce_cancel_event
 
-                # The on_event method might be called from different threads (like observers or UI)
-                # Create a task safely in a background event loop or thread
-                def _run_debounced(cancel_event):
-                    # wait for debounce delay
-                    if cancel_event.wait(self._debounce_delay):
-                        return # cancelled
+            # The on_event method might be called from different threads (like observers or UI)
+            # Create a task safely in a background event loop or thread
+            def _run_debounced(cancel_event):
+                # wait for debounce delay
+                if cancel_event.wait(self._debounce_delay):
+                    return # cancelled
 
-                    # proceed to run
+                # proceed to run
+                try:
+                    logger.info("Debounce finished, running process_events")
+
+                    # Set up a new event loop for this thread if one doesn't exist
                     try:
-                        logger.info("Debounce finished, running process_events")
+                        loop = asyncio.get_event_loop()
+                        if loop.is_closed():
+                            raise RuntimeError("Event loop is closed")
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
 
-                        # Set up a new event loop for this thread if one doesn't exist
-                        try:
-                            loop = asyncio.get_event_loop()
-                        except RuntimeError:
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
+                    loop.run_until_complete(self._process_events())
+                except Exception as e:
+                    import traceback
+                    logger.error(f"Error in debounced task: {e}\n{traceback.format_exc()}")
 
-                        loop.run_until_complete(self._process_events())
-                    except Exception as e:
-                        import traceback
-                        logger.error(f"Error in debounced task: {e}\n{traceback.format_exc()}")
-
-                self._debounce_task_thread = threading.Thread(
-                    target=_run_debounced,
-                    args=(self._debounce_cancel_event,)
-                )
-                self._debounce_task_thread.daemon = True
-                self._debounce_task_thread.start()
+            self._debounce_task_thread = threading.Thread(
+                target=_run_debounced,
+                args=(cancel_evt,)
+            )
+            self._debounce_task_thread.daemon = True
+            self._debounce_task_thread.start()
 
     async def _process_events(self) -> None:
         """Process buffered events."""
-        if not self._event_buffer:
-            return
-        
-        events = self._event_buffer.copy()
-        self._event_buffer.clear()
+        events = []
+        with self._thread_lock:
+            if not self._event_buffer:
+                return
+
+            events = self._event_buffer.copy()
+            self._event_buffer.clear()
+
         logger.info(f"Processing {len(events)} events")
 
-        # Don't proceed if events list is too short or just contains the trigger
+        # Don't proceed if events list is empty
         if not events:
             return
 
