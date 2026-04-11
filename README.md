@@ -4,11 +4,14 @@ A personal AI assistant that learns from your work patterns and helps you comple
 
 ## Features
 
-- **Autonomous Observation**: Monitors your work across multiple applications
-- **Pattern Learning**: Analyzes your behavior to discover recurring workflows
-- **Skill Generation**: Creates reusable skills from repeated tasks
-- **Memory**: Stores learned knowledge across sessions
-- **CLI-First**: Lightweight command-line interface
+- **Autonomous Observation**: Monitors your work across multiple applications.
+- **Deep Web Tracking**: Captures granular DOM interactions (clicks, inputs, URLs, content) through a custom WebSocket Chrome Extension.
+- **Web UI Console**: Real-time FastAPI dashboard showing detailed Event Streams, LLM Thoughts, and Memories.
+- **Streaming Chain of Thought**: `<think>` tags are extracted and streamed directly to the Web UI as the LLM processes events.
+- **Two-Way Chat Interventions**: The LLM will ask you clarifying questions right in the Web UI if your intent isn't clear, allowing you to answer back and guide it.
+- **Native macOS Efficiency**: Utilizes AppKit (`pyobjc`) instead of subprocess polling for zero-overhead window tracking.
+- **Pattern Learning**: Analyzes your behavior to discover recurring workflows.
+- **Memory**: Stores learned knowledge locally in SQLite.
 
 ## Installation
 
@@ -129,5 +132,6 @@ All observation data stays local. No cloud upload.
 ## Requirements
 
 - Python 3.11+
-- macOS (other platforms coming soon)
-- LLM endpoint (Ollama, OpenAI, etc.)
+- macOS (requires `pyobjc` for native window tracking)
+- LLM endpoint (Ollama, OpenAI, Anthropic, OpenRouter)
+- Custom Chrome Extension (for full DOM monitoring)
